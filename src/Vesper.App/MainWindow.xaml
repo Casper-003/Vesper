@@ -7,8 +7,7 @@
       <local:BooleanToVisibilityConverter x:Key="BoolVisibility"/><local:CoverColorConverter x:Key="CoverColor"/>
       <SolidColorBrush x:Key="OverviewEvenBrush" Color="#1A808080"/>
       <SolidColorBrush x:Key="OverviewOddBrush" Color="#05808080"/><SolidColorBrush x:Key="OverviewEvenHoverBrush" Color="#383838"/><SolidColorBrush x:Key="OverviewOddHoverBrush" Color="#303030"/>
-      <SolidColorBrush x:Key="OverviewHeaderBrush" Color="#202020"/>
-      <SolidColorBrush x:Key="OverviewDefaultArtworkBrush" Color="#48545C"/>
+      <SolidColorBrush x:Key="OverviewSystemAccentBrush" Color="{ThemeResource SystemAccentColor}"/>
       <Style x:Key="ShellCardStyle" TargetType="Border">
         <Setter Property="CornerRadius" Value="8"/>
         <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}"/>
@@ -211,8 +210,8 @@
           </StackPanel>
             </ListView.Footer>
           </ListView>
-          <Grid x:Name="HomeHeroLayer" Height="260" VerticalAlignment="Top" IsHitTestVisible="False" Background="{StaticResource OverviewHeaderBrush}">
-            <Grid Background="{StaticResource OverviewDefaultArtworkBrush}"><Border Background="#33000000"/></Grid>
+          <Grid x:Name="HomeHeroLayer" Height="260" VerticalAlignment="Top" IsHitTestVisible="False">
+            <Grid Background="{StaticResource OverviewSystemAccentBrush}"><Border Background="#33000000"/></Grid>
             <Canvas x:Name="HomeTitleMotion" Margin="32,0,0,0"><TextBlock x:Name="HomeTitleBold" Canvas.Left="0" Text="Home" FontSize="96" LineHeight="116" FontWeight="Bold" Foreground="White"/></Canvas>
           </Grid>
           <Grid x:Name="HomeScrollRail" Width="16" HorizontalAlignment="Right" Background="Transparent" Visibility="Collapsed">
@@ -223,8 +222,8 @@
           <ListView x:Name="CreationOverview" Margin="24,48,24,12" SelectionMode="None" ScrollViewer.IsScrollInertiaEnabled="True" ScrollViewer.IsDeferredScrollingEnabled="False" ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollMode="Enabled" ScrollViewer.VerticalScrollBarVisibility="Hidden" Loaded="OnOverviewLoaded">
             <ListView.Header><Grid x:Name="CreationHeaderSpace" Height="280"/></ListView.Header>
           </ListView>
-          <Grid x:Name="CreationHeroLayer" Height="260" VerticalAlignment="Top" IsHitTestVisible="False" Background="{StaticResource OverviewHeaderBrush}">
-            <Grid Background="{StaticResource OverviewDefaultArtworkBrush}"><Border Background="#33000000"/></Grid>
+          <Grid x:Name="CreationHeroLayer" Height="260" VerticalAlignment="Top" IsHitTestVisible="False">
+            <Grid Background="{StaticResource OverviewSystemAccentBrush}"><Border Background="#33000000"/></Grid>
             <Canvas x:Name="CreationTitleMotion" Margin="32,0,0,0"><TextBlock x:Name="CreationTitleBold" Canvas.Left="0" Text="Create" FontSize="96" LineHeight="116" FontWeight="Bold" Foreground="White"/></Canvas>
           </Grid>
           <Grid x:Name="CreationScrollRail" Width="16" HorizontalAlignment="Right" Background="Transparent" Visibility="Collapsed">
@@ -238,8 +237,8 @@
                 <Grid x:Name="LibraryHeaderSpace" Height="280"/>
               </ListView.Header><ListView.Footer><Grid/></ListView.Footer>
             </ListView>
-            <Grid x:Name="LibraryHeroLayer" Height="260" VerticalAlignment="Top" IsHitTestVisible="False" Background="{StaticResource OverviewHeaderBrush}">
-              <Grid x:Name="LibraryHeroArtwork" Background="{Binding LibraryHero.CoverColor, Converter={StaticResource CoverColor}}">
+            <Grid x:Name="LibraryHeroLayer" Height="260" VerticalAlignment="Top" IsHitTestVisible="False">
+              <Grid x:Name="LibraryHeroArtwork" Background="{StaticResource OverviewSystemAccentBrush}">
 
                 <Border Background="#33000000"/>
               </Grid>
@@ -304,8 +303,8 @@
               <Grid x:Name="FavoriteHeaderSpace" Height="280"/>
             </ListView.Header><ListView.Footer><Grid/></ListView.Footer>
           </ListView>
-          <Grid x:Name="FavoriteHeroLayer" Height="260" VerticalAlignment="Top" IsHitTestVisible="False" Background="{StaticResource OverviewHeaderBrush}">
-            <Grid x:Name="FavoriteHeroArtwork" Background="{Binding LatestFavorite.CoverColor, Converter={StaticResource CoverColor}}">
+          <Grid x:Name="FavoriteHeroLayer" Height="260" VerticalAlignment="Top" IsHitTestVisible="False">
+            <Grid x:Name="FavoriteHeroArtwork" Background="{StaticResource OverviewSystemAccentBrush}">
 
               <Border Background="#33000000"/>
             </Grid>

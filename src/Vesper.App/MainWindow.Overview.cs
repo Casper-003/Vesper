@@ -278,7 +278,6 @@ public sealed partial class MainWindow
         ((SolidColorBrush)Root.Resources["OverviewOddBrush"]).Color = dark ? Windows.UI.Color.FromArgb(255, 34, 34, 34) : Windows.UI.Color.FromArgb(255, 239, 239, 239);
         ((SolidColorBrush)Root.Resources["OverviewEvenHoverBrush"]).Color = dark ? Windows.UI.Color.FromArgb(255, 56, 56, 56) : Windows.UI.Color.FromArgb(255, 255, 255, 255);
         ((SolidColorBrush)Root.Resources["OverviewOddHoverBrush"]).Color = dark ? Windows.UI.Color.FromArgb(255, 22, 22, 22) : Windows.UI.Color.FromArgb(255, 224, 224, 224);
-        ((SolidColorBrush)Root.Resources["OverviewHeaderBrush"]).Color = dark ? Windows.UI.Color.FromArgb(255, 32, 32, 32) : Windows.UI.Color.FromArgb(255, 250, 250, 250);
         foreach (var list in new[] { LibrarySongs, FavoriteSongs })
             if (list.ItemsPanelRoot is Panel panel)
                 foreach (var item in panel.Children.OfType<ListViewItem>())
