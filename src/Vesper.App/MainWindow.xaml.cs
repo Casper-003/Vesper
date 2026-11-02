@@ -148,7 +148,12 @@ public sealed partial class MainWindow : Window
         if (!ready || changingSelection) return;
         string? page = args.IsSettingsSelected ? "设置" : (args.SelectedItem as NavigationViewItem)?.Tag as string;
         if (page is null || (ContentFrame.Content as ShellPage)?.PageKey == page) return;
-        ContentFrame.Navigate(typeof(ShellPage), new ShellNavigationRequest(page, this), new EntranceNavigationTransitionInfo());
+        bool createTransition = page == "创作" || (ContentFrame.Content as ShellPage)?.PageKey == "创作";
+        // Create already animates the sidebar width. Avoid layering a page fade
+        // and slide over that transition, which exposed the light card background.
+        NavigationTransitionInfo transition = createTransition
+            ? new SuppressNavigationTransitionInfo() : new EntranceNavigationTransitionInfo();
+        ContentFrame.Navigate(typeof(ShellPage), new ShellNavigationRequest(page, this), transition);
     }
 
     private void OnBack(object sender, RoutedEventArgs e)
