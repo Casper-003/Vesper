@@ -189,6 +189,7 @@ public sealed partial class MainWindow : Window
 
     internal void AttachPageContent(ShellPage page, string key, string? songId)
     {
+        PrepareOverviewBackground(key, songId);
         if (!pageContent.TryGetValue(key, out FrameworkElement? content))
         {
             content = songId is not null ? new SongDetailsView(this, songId)
