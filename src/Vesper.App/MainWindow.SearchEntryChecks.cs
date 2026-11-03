@@ -143,7 +143,7 @@ public sealed partial class MainWindow
             Check(GlobalSearchBox.Text == "搜索回归 mixed 123" && ReferenceEquals(Navigation.SelectedItem, originalSelection)
                 && ReferenceEquals(ContentFrame.Content, originalPage) && navigations == 0
                 && ContentFrame.BackStack.SequenceEqual(back) && ContentFrame.ForwardStack.SequenceEqual(forward),
-                "typing, pane motion and native search Click must retain input, navigation selection, page and browser history.");
+                "programmatic text changes, pane motion and native search Click must retain input, navigation selection, page and browser history; committed user input is covered by search checks.");
         }
         finally
         {

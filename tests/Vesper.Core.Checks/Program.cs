@@ -1,6 +1,12 @@
 using Vesper.Core;
 using Vesper.App;
 
+if (args.Contains("--search-benchmark", StringComparer.Ordinal))
+{
+    SearchChecks.Benchmark();
+    return;
+}
+
 string root = Path.Combine(Path.GetTempPath(), "VesperChecks-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 int count = 0;
@@ -111,6 +117,9 @@ try
     LyricsDisplayChecks.Run(Check);
     await OverviewChecks.RunAsync(root, Check);
     MatroskaChecks.Run(Check);
+    SearchChecks.Run(Check);
+    await SearchChecks.RunRequestGateAsync(Check);
+    await SearchChecks.RunModelAsync(root, Check);
     model.BeginMetadataRead();
     Check(model.HasBackgroundActivity && !model.Idle && model.CanManage && model.ActivityLabel == "读取歌曲资料",
         "画质与艺人资料读取也纳入后台仪表，并保持目录操作可用");

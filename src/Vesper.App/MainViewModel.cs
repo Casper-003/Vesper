@@ -88,16 +88,30 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
     public bool HideUnavailable
     {
         get => hideUnavailable;
-        set { if (hideUnavailable == value) return; hideUnavailable = value; Notify(); Filter(); }
+        set
+        {
+            bool indexStarted;
+            lock (searchIndexGate)
+            {
+                if (hideUnavailable == value) return;
+                hideUnavailable = value;
+                indexStarted = MarkSearchIndexDirty();
+            }
+            Notify(); Filter();
+            AnnounceSearchIndexBuild(indexStarted);
+        }
     }
 
-    public MainViewModel(string? storePath = null, ScanLibrary? scanner = null, TimeProvider? timeProvider = null)
+    public MainViewModel(string? storePath = null, ScanLibrary? scanner = null, TimeProvider? timeProvider = null,
+        BuildSearchIndex? searchIndexBuilder = null)
     {
         Store = new(storePath ?? Path.Combine(Environment.GetFolderPath(
             Environment.SpecialFolder.LocalApplicationData), "Vesper", "Prototype", "library.json"));
         this.scanner = scanner ?? ((directories, previous, cache, progress, token) =>
             LibraryScanner.ScanAsync(directories, previous, token, cache, progress));
         clock = timeProvider ?? TimeProvider.System;
+        this.searchIndexBuilder = searchIndexBuilder ?? ((documents, revision, hide, token) =>
+            Task.FromResult(LocalSearchIndex.Build(documents, revision, hide, token)));
         Queue.Pending.CollectionChanged += (_, _) => OnQueueChanged();
         Queue.PropertyChanged += (_, args) => { if (args.PropertyName == nameof(PlaybackQueue.Current)) OnQueueChanged(); };
     }
@@ -128,16 +142,26 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
             CaptureQueue();
             if (Library.Details.Values.Any(value => value is null)) throw new InvalidDataException("歌曲资料记录不完整。");
             Song[] loaded = Library.Songs.ToArray();
-            availability = await Task.Run(() => GetAvailability(loaded));
-            initialized = true;
+            var loadedAvailability = await Task.Run(() => GetAvailability(loaded));
+            bool indexStarted;
+            lock (searchIndexGate)
+            {
+                availability = loadedAvailability.Songs;
+                searchAvailableSources = loadedAvailability.Sources;
+                initialized = true;
+                indexStarted = MarkSearchIndexDirty();
+            }
             RebuildDirectories(); Filter();
+            AnnounceSearchIndexBuild(indexStarted);
             await RefreshAsync();
         }
         catch (Exception ex)
         {
-            Library = new(); ReadOnly = true; initialized = true; Busy = false;
+            lock (searchIndexGate) { Library = new(); ReadOnly = true; initialized = true; }
+            Busy = false;
             Problem = $"无法读取曲库记录，已停止写入以保护原记录：{ex.Message}";
             Status = "曲库未加载"; NotifyState();
+            FailSearchIndexInitialization(Problem);
         }
     }
 
@@ -182,13 +206,20 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
                     if (disposed) break;
                     Library.ScanCache = scan.Cache;
                     if (revision != directoryRevision) { scanRequested = true; continue; }
-                    Library.Songs = scan.Songs;
-                    RemapDetails(scan.Aliases);
+                    bool indexStarted;
+                    lock (searchIndexGate)
+                    {
+                        Library.Songs = scan.Songs;
+                        RemapDetails(scan.Aliases);
+                        availability = available.Songs;
+                        searchAvailableSources = available.Sources;
+                        indexStarted = MarkSearchIndexDirty();
+                    }
                     RemapFavorites(scan.Aliases);
                     Queue.RemapSongIds(scan.Aliases);
-                    availability = available;
                     LastScanStatistics = scan.Statistics;
                     Filter(); RebuildDirectories();
+                    AnnounceSearchIndexBuild(indexStarted);
                     activityDetail = "正在保存曲库"; NotifyActivity();
                     await Store.SaveAsync(Library);
                     LastScanStatistics = scan.Statistics with { Elapsed = passTimer.Elapsed };
@@ -228,14 +259,21 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
     public async Task RemoveDirectoryAsync(string directory)
     {
         if (!CanManage || !Library.Directories.Remove(directory)) return;
-        Library.Songs = Library.Songs.Select(song => song with
+        bool indexStarted;
+        lock (searchIndexGate)
         {
-            KnownSources = song.Sources.Concat(song.KnownSources ?? []).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
-            Sources = song.Sources.Where(path => Library.Directories.Any(root => IsWithin(path, root))).ToList()
-        }).ToList();
-        availability = Library.Songs.ToDictionary(song => song.Id,
-            song => song.Sources.Count > 0 && availability.GetValueOrDefault(song.Id));
+            Library.Songs = Library.Songs.Select(song => song with
+            {
+                KnownSources = song.Sources.Concat(song.KnownSources ?? []).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                Sources = song.Sources.Where(path => Library.Directories.Any(root => IsWithin(path, root))).ToList()
+            }).ToList();
+            searchAvailableSources.IntersectWith(Library.Songs.SelectMany(song => song.Sources));
+            availability = Library.Songs.ToDictionary(song => song.Id,
+                song => song.Sources.Any(searchAvailableSources.Contains));
+            indexStarted = MarkSearchIndexDirty();
+        }
         Filter(); DirectoriesChanged();
+        AnnounceSearchIndexBuild(indexStarted);
         await PersistAsync();
         await RefreshAsync();
     }
@@ -244,6 +282,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         directoryRevision++; scanRequested = true;
         scanCancellation?.Cancel(); RebuildDirectories();
+        InvalidateSearchIndex();
     }
 
     private async Task PersistAsync()
@@ -442,8 +481,20 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
         return moves;
     }
 
-    private static Dictionary<string, bool> GetAvailability(IEnumerable<Song> songs) =>
-        songs.ToDictionary(song => song.Id, song => song.IsAvailable);
+    private sealed record AvailabilitySnapshot(Dictionary<string, bool> Songs, HashSet<string> Sources);
+    private static AvailabilitySnapshot GetAvailability(IEnumerable<Song> songs)
+    {
+        var bySong = new Dictionary<string, bool>();
+        var sources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Song song in songs)
+        {
+            bool available = false;
+            foreach (string path in song.Sources)
+                if (File.Exists(path)) { sources.Add(path); available = true; }
+            bySong[song.Id] = available;
+        }
+        return new(bySong, sources);
+    }
     private static string Normalize(string path) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
     private static bool IsWithin(string path, string root) => string.Equals(Normalize(path), Normalize(root), StringComparison.OrdinalIgnoreCase)
         || Normalize(path).StartsWith(Path.EndsInDirectorySeparator(Normalize(root)) ? Normalize(root)
@@ -458,5 +509,5 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
             nameof(DirectorySummary), nameof(LibrarySummary), nameof(EmptyMessage), nameof(EmptyHint) }) Notify(property);
     }
     private void Notify([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new(name));
-    public void Dispose() { disposed = true; scanCancellation?.Cancel(); }
+    public void Dispose() { DisposeSearchIndex(); scanCancellation?.Cancel(); }
 }

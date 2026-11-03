@@ -18,7 +18,7 @@ public sealed class BooleanToVisibilityConverter : IValueConverter
 
 public sealed partial class MainWindow
 {
-    private readonly MainViewModel viewModel = new();
+    private readonly MainViewModel viewModel = new(SearchCheckStorePath());
     private bool libraryInitialized;
     private bool pickingFolder;
     private readonly DispatcherTimer libraryFeedbackTimer = new() { Interval = TimeSpan.FromSeconds(4) };
@@ -60,8 +60,7 @@ public sealed partial class MainWindow
         { favoriteHero = latest; _ = LoadDetailsAsync(latest); }
         if (e.PropertyName is nameof(MainViewModel.HasBackgroundActivity) or nameof(MainViewModel.ActivityLabel)
             or nameof(MainViewModel.ActivityTooltip) or nameof(MainViewModel.ActivityGlyph))
-            activityDisplay.Request(new(viewModel.HasBackgroundActivity, viewModel.ActivityLabel, viewModel.ActivityTooltip,
-                viewModel.ActivityGlyph), activityClock.Elapsed);
+            RequestLibraryActivityStatus();
         if (e.PropertyName != nameof(MainViewModel.Status)) return;
         if (viewModel.Status.StartsWith("已加入待播", StringComparison.Ordinal)) return;
         libraryFeedbackTimer.Stop();
