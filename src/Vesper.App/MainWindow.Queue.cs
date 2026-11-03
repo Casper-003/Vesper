@@ -75,10 +75,13 @@ public sealed partial class MainWindow
         if (queueClosing) return;
         queueClosing = true;
         Root.IsHitTestVisible = false;
+        CloseLibraryEnrichment();
+        await viewModel.FlushBackgroundMetadataAsync();
         bool saved = await viewModel.FlushQueueAsync();
         Root.IsHitTestVisible = true;
         queueClosing = false;
         if (saved) { queueCloseApproved = true; Close(); }
+        else StartLibraryEnrichment();
     }
 
     private void CloseQueuePresentation()

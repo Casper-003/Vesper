@@ -18,6 +18,7 @@ public sealed partial class MainWindow
     {
         internal float HeaderHeight = float.NaN;
         internal double NativeTitleFontSize = double.NaN;
+        internal string TitleText = "";
     }
     private readonly Dictionary<ListView, OverviewMotion> overviewMotions = [];
     private bool stripeRefreshQueued;
@@ -85,10 +86,12 @@ public sealed partial class MainWindow
     private bool IsSongVisible(LibrarySongItem song)
     {
         var key = (ContentFrame.Content as ShellPage)?.PageKey;
-        var list = key == "曲库" ? LibrarySongs : key == "收藏" ? FavoriteSongs : null;
+        var list = key == "曲库" ? LibrarySongs : key == "收藏" ? FavoriteSongs
+            : key is not null && pageContent.GetValueOrDefault(key) is EntityDetailsView entity ? entity.SongList : null;
         if (list?.ItemsPanelRoot is not ItemsStackPanel panel) return false;
         for (int index = Math.Max(0, panel.FirstVisibleIndex); index <= panel.LastVisibleIndex; index++)
-            if (list.ContainerFromIndex(index) is ListViewItem { Content: LibrarySongItem visible } && ReferenceEquals(visible, song)) return true;
+            if (list.ContainerFromIndex(index) is ListViewItem container
+                && ReferenceEquals(container.Content is EntitySongRow row ? row.Song : container.Content, song)) return true;
         return false;
     }
 
@@ -105,6 +108,9 @@ public sealed partial class MainWindow
     private (Grid Page, Grid Hero, Canvas TitleMotion, TextBlock Title, Grid Spacer, Grid ScrollRail, ScrollBar ScrollBar)
         GetOverviewParts(ListView list)
     {
+        if (entityOverviews.TryGetValue(list, out var entity))
+            return (entity.PageGrid, entity.HeroLayer, entity.TitleMotionHost, entity.HeroTitle,
+                entity.HeaderSpace, entity.ScrollRail, entity.ScrollBarPart);
         if (ReferenceEquals(list, HomeOverview))
             return (HomePage, HomeHeroLayer, HomeTitleMotion, HomeTitleBold, HomeHeaderSpace, HomeScrollRail, HomeScrollBar);
         if (ReferenceEquals(list, CreationOverview))
@@ -141,6 +147,8 @@ public sealed partial class MainWindow
         Grid spacer = parts.Spacer;
         float height = (float)Math.Max(64, page.ActualHeight * .382);
         hero.Height = height;
+        entityOverviews.TryGetValue(list, out var entity);
+        entity?.RefreshHeaderMetrics(height);
         bool library = ReferenceEquals(list, LibrarySongs);
         spacer.Height = height - 48 + (library ? 52 : 16);
         // Vertically center left-aligned empty states below the hero, leaving the library toolbar clear.
@@ -153,6 +161,20 @@ public sealed partial class MainWindow
             footer.Height = 0;
         if (existing is not null)
         {
+            existing.Metrics.InsertScalar("TitleLeftShift", (float)(entity is null ? 0 : Math.Max(0, titleMotion.Margin.Left - 32)));
+            existing.Metrics.InsertScalar("TitleBottomGap", entity?.HasSubtitle == true ? 40 : 16);
+            if (existing.TitleText != title.Text)
+            {
+                title.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+                existing = existing with
+                {
+                    TitleWidthPerFontUnit = title.DesiredSize.Width / title.FontSize,
+                    TitleHeightPerFontUnit = title.DesiredSize.Height / title.FontSize,
+                    TitleLineHeightPerFontUnit = title.LineHeight / title.FontSize
+                };
+                existing.TitleText = title.Text;
+                overviewMotions[list] = existing;
+            }
             UpdateOverviewTitleLayout(existing, title, page.ActualWidth - titleMotion.Margin.Left - 32, height);
             SyncOverviewBackground(list);
             return;
@@ -161,12 +183,15 @@ public sealed partial class MainWindow
         var compositor = visual.Compositor;
         var properties = ElementCompositionPreview.GetScrollViewerManipulationPropertySet(scroll);
         var metrics = compositor.CreatePropertySet();
+        metrics.InsertScalar("TitleLeftShift", (float)(entity is null ? 0 : Math.Max(0, titleMotion.Margin.Left - 32)));
+        metrics.InsertScalar("TitleBottomGap", entity?.HasSubtitle == true ? 40 : 16);
         // Measure the typeface proportions once. Background changes set the native
         // text size; only scrolling scales that correctly sized text down.
         title.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
         var motion = new OverviewMotion(scroll, properties, metrics,
             title.DesiredSize.Width / title.FontSize, title.DesiredSize.Height / title.FontSize,
             title.LineHeight / title.FontSize);
+        motion.TitleText = title.Text;
         overviewMotions[list] = motion;
         UpdateOverviewTitleLayout(motion, title, page.ActualWidth - titleMotion.Margin.Left - 32, height);
         scroll.ViewChanged += OnOverviewViewChanged;
@@ -182,7 +207,7 @@ public sealed partial class MainWindow
         visual.Clip = clip;
         clip.StartAnimation("BottomInset", Expression($"({progress}) * (metrics.Height - 48)"));
         // Animate the shared title host through XAML facade properties, avoiding layout-owned offsets/scales.
-        var translation = Expression($"Vector3(0, (metrics.Height - metrics.TitleHeight - 16) * (1 - ({progress})) + 9 * ({progress}), 0)");
+        var translation = Expression($"Vector3(-metrics.TitleLeftShift * ({progress}), (metrics.Height - metrics.TitleHeight - metrics.TitleBottomGap) * (1 - ({progress})) + 9 * ({progress}), 0)");
         translation.Target = "Translation";
         titleMotion.StartAnimation(translation);
         string visibleScale = $"metrics.ExpandedTitleScale * (1 - ({progress})) + metrics.CompactTitleScale * ({progress})";
@@ -225,14 +250,17 @@ public sealed partial class MainWindow
 
     private void OnOverviewContainerChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
     {
-        if (args.ItemContainer.ContentTemplateRoot is SongRowSurface surface)
+        var surface = args.ItemContainer.ContentTemplateRoot as SongRowSurface
+            ?? (args.ItemContainer.ContentTemplateRoot is { } root ? FindChild<SongRowSurface>(root) : null);
+        if (surface is not null)
         {
             if (args.InRecycleQueue) surface.SetHovered(false);
             else
             {
                 // Compiled templates may reuse their binding root without updating inherited DataContext.
                 // Keep command handlers and the cover Image's binding on the current song as well.
-                if (!ReferenceEquals(surface.DataContext, args.Item)) surface.DataContext = args.Item;
+                object item = args.Item is EntitySongRow row ? row.Song : args.Item;
+                if (!ReferenceEquals(surface.DataContext, item)) surface.DataContext = item;
                 PaintSongRow(surface, args.ItemIndex);
             }
         }
@@ -241,7 +269,9 @@ public sealed partial class MainWindow
     }
     private void SetRowBrush(ListViewItem item, int index)
     {
-        if (item.ContentTemplateRoot is SongRowSurface surface) PaintSongRow(surface, index);
+        var surface = item.ContentTemplateRoot as SongRowSurface
+            ?? (item.ContentTemplateRoot is { } root ? FindChild<SongRowSurface>(root) : null);
+        if (surface is not null) PaintSongRow(surface, index);
     }
     private void PaintSongRow(SongRowSurface surface, int index)
     {
@@ -259,6 +289,9 @@ public sealed partial class MainWindow
             {
                 int index = LibrarySongs.IndexFromContainer(container);
                 if (index < 0) index = FavoriteSongs.IndexFromContainer(container);
+                if (index < 0)
+                    foreach (var list in entityOverviews.Keys)
+                    { index = list.IndexFromContainer(container); if (index >= 0) break; }
                 PaintSongRow(surface, index);
                 return;
             }
@@ -272,7 +305,7 @@ public sealed partial class MainWindow
         {
             stripeRefreshQueued = false;
             if (closed) return;
-            foreach (var list in new[] { LibrarySongs, FavoriteSongs, HomeOverview, CreationOverview })
+            foreach (var list in new[] { LibrarySongs, FavoriteSongs, HomeOverview, CreationOverview }.Concat(entityOverviews.Keys))
             {
                 if (list.ItemsPanelRoot is Panel panel)
                     foreach (var container in panel.Children.OfType<ListViewItem>()) SetRowBrush(container, list.IndexFromContainer(container));
@@ -286,10 +319,14 @@ public sealed partial class MainWindow
         ((SolidColorBrush)Root.Resources["OverviewOddBrush"]).Color = dark ? Windows.UI.Color.FromArgb(255, 34, 34, 34) : Windows.UI.Color.FromArgb(255, 239, 239, 239);
         ((SolidColorBrush)Root.Resources["OverviewEvenHoverBrush"]).Color = dark ? Windows.UI.Color.FromArgb(255, 56, 56, 56) : Windows.UI.Color.FromArgb(255, 255, 255, 255);
         ((SolidColorBrush)Root.Resources["OverviewOddHoverBrush"]).Color = dark ? Windows.UI.Color.FromArgb(255, 22, 22, 22) : Windows.UI.Color.FromArgb(255, 224, 224, 224);
-        foreach (var list in new[] { LibrarySongs, FavoriteSongs })
+        foreach (var list in new[] { LibrarySongs, FavoriteSongs }.Concat(entityOverviews.Keys))
             if (list.ItemsPanelRoot is Panel panel)
                 foreach (var item in panel.Children.OfType<ListViewItem>())
-                    if (item.ContentTemplateRoot is SongRowSurface surface) surface.RefreshHoverPalette();
+                {
+                    var surface = item.ContentTemplateRoot as SongRowSurface
+                        ?? (item.ContentTemplateRoot is { } root ? FindChild<SongRowSurface>(root) : null);
+                    surface?.RefreshHoverPalette();
+                }
         RefreshQueueRowPalette();
     }
 }

@@ -7,6 +7,7 @@ namespace Vesper.Core;
 public sealed record SongMatch(string RecordingId, string ReleaseId, string Title, string Artist,
     string Album, string Year, string Version, string ReleaseType = "", string ReleaseStatus = "", string CoverUrl = "")
 {
+    public IReadOnlyList<MusicArtistCredit> ArtistCredits { get; init; } = [];
     public string Description => string.Join(" · ", new[] { Album, Year, Version }.Where(value => value.Length > 0));
 }
 
@@ -41,6 +42,10 @@ public sealed class MusicBrainzClient(HttpClient client)
             string name = Text(recording, "title");
             string credit = recording.TryGetProperty("artist-credit", out var artists)
                 ? string.Concat(artists.EnumerateArray().Select(a => Text(a, "name") + Text(a, "joinphrase"))) : "";
+            var credits = recording.TryGetProperty("artist-credit", out var creditArray) ? creditArray.EnumerateArray()
+                .Where(value => Text(value, "name").Length > 0).Select(value => new MusicArtistCredit(Text(value, "name"),
+                    ExternalIds: value.TryGetProperty("artist", out var artist) && Guid.TryParse(Text(artist, "id"), out _)
+                        ? new[] { new MusicExternalId("musicbrainz", "artist", Text(artist, "id")) } : [])).ToArray() : [];
             string version = Text(recording, "disambiguation");
             if (recording.TryGetProperty("releases", out var releases) && releases.GetArrayLength() > 0)
                 foreach (var release in releases.EnumerateArray())
@@ -49,9 +54,10 @@ public sealed class MusicBrainzClient(HttpClient client)
                     if (!Guid.TryParse(releaseId, out _)) continue;
                     matches.Add(new(recordingId, releaseId, name, credit, Text(release, "title"),
                         Text(release, "date"), string.Join(" · ", new[] { version, Text(release, "disambiguation"), Text(release, "country") }.Where(s => s.Length > 0)),
-                        release.TryGetProperty("release-group", out var group) ? Text(group, "primary-type") : "", Text(release, "status")));
+                        release.TryGetProperty("release-group", out var group) ? Text(group, "primary-type") : "", Text(release, "status"))
+                        { ArtistCredits = credits });
                 }
-            else matches.Add(new(recordingId, "", name, credit, "", Text(recording, "first-release-date"), version));
+            else matches.Add(new(recordingId, "", name, credit, "", Text(recording, "first-release-date"), version) { ArtistCredits = credits });
         }
         return matches.DistinctBy(match => (match.RecordingId, match.ReleaseId)).ToList();
     }
@@ -71,7 +77,13 @@ public sealed class MusicBrainzClient(HttpClient client)
         }
         return new(match.Title, match.Artist, match.Album, publisher, date.Length >= 4 ? date[..4] : date,
             SourceUrl: $"https://musicbrainz.org/recording/{match.RecordingId}",
-            CoverUrl: Guid.TryParse(match.ReleaseId, out _) ? $"https://coverartarchive.org/release/{match.ReleaseId}/front-500" : "");
+            CoverUrl: Guid.TryParse(match.ReleaseId, out _) ? $"https://coverartarchive.org/release/{match.ReleaseId}/front-500" : "")
+        {
+            // Choosing a likely recording/release for descriptive metadata does not prove
+            // that the local file belongs to that edition. Do not bind a release or its track order.
+            ExternalIds = Guid.TryParse(match.RecordingId, out _) ? [new("musicbrainz", "recording", match.RecordingId)] : [],
+            ArtistCredits = match.ArtistCredits
+        };
     }
 
     private async Task<JsonDocument> GetAsync(string path, CancellationToken token)

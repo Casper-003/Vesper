@@ -19,7 +19,7 @@ public sealed partial class MainWindow
             "曲库" => LibrarySongs,
             "收藏" => FavoriteSongs,
             "创作" => CreationOverview,
-            _ => null
+            _ => pageContent.GetValueOrDefault(key) is EntityDetailsView entity ? entity.SongList : null
         };
         OverviewBackdrop.Visibility = overviewBackdropList is null ? Visibility.Collapsed : Visibility.Visible;
         if (overviewBackdropList is { } list)

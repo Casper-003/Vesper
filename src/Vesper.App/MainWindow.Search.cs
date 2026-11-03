@@ -18,12 +18,15 @@ public sealed partial class MainWindow
 
     private void InitializeSearchPresentation()
     {
+        InitializeEntityDetailsPresentation();
         GlobalSearchBox.TextChanged += OnGlobalSearchTextChanged;
         GlobalSearchBox.Loaded += (_, _) => AttachSearchInput();
         viewModel.SearchIndexChanged += OnSearchIndexChanged;
         ContentFrame.Navigating += (_, _) =>
         {
             if ((ContentFrame.Content as ShellPage)?.PageKey == "搜索") searchResults?.CapturePosition();
+            string? key = (ContentFrame.Content as ShellPage)?.PageKey;
+            if (key is not null && pageContent.GetValueOrDefault(key) is EntityDetailsView entity) entity.CapturePosition();
         };
     }
 
@@ -164,6 +167,7 @@ public sealed partial class MainWindow
     {
         if (closed) return;
         RequestLibraryActivityStatus();
+        if (!viewModel.IsSearchIndexBuilding) RequestEntityRefresh();
         if (composingSearch || (ContentFrame.Content as ShellPage)?.PageKey != "搜索" || string.IsNullOrWhiteSpace(searchText)) return;
         if (SearchResults.IsInteracting) { deferredSearchRefresh = true; return; }
         // Building notifications do not cancel a usable old snapshot query. A new publication does.
@@ -210,6 +214,7 @@ public sealed partial class MainWindow
 
     private void CloseSearchPresentation()
     {
+        entityRefreshTimer.Stop();
         searchRequests.Dispose(); viewModel.SearchIndexChanged -= OnSearchIndexChanged;
         if (searchTextBox is null) return;
         searchTextBox.TextCompositionStarted -= OnSearchCompositionStarted;

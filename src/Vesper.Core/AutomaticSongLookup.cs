@@ -75,7 +75,8 @@ public sealed class AutomaticSongLookup(
                     // 标签接口暂不可用时，搜索已确认的基本资料仍可使用。
                     metadata = new(chosen.Title, chosen.Artist, chosen.Album, Year: chosen.Year.Length >= 4 ? chosen.Year[..4] : chosen.Year,
                         SourceUrl: "https://musicbrainz.org/recording/" + chosen.RecordingId,
-                        CoverUrl: chosen.ReleaseId.Length > 0 ? "https://coverartarchive.org/release/" + chosen.ReleaseId + "/front-500" : "");
+                        CoverUrl: chosen.ReleaseId.Length > 0 ? "https://coverartarchive.org/release/" + chosen.ReleaseId + "/front-500" : "")
+                    { ExternalIds = [new("musicbrainz", "recording", chosen.RecordingId)], ArtistCredits = chosen.ArtistCredits };
                 }
             }
             else metadataOutcome = metadataFailed ? LookupOutcome.Unavailable

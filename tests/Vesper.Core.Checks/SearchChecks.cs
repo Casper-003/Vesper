@@ -90,6 +90,12 @@ internal static class SearchChecks
             && emptyArtistHits.All(hit => !string.IsNullOrWhiteSpace(hit.Id)) && emptyAlbumHits.All(hit => !string.IsNullOrWhiteSpace(hit.Id)),
             "空或全空白艺人及专辑 ID 使用保守稳定回退，不合并不同艺人及其同名专辑");
         var albums = Search("回声");
+        const string persistentAlbumId = "album:persistent-without-artist";
+        var knownAlbumWithoutArtist = LocalSearchIndex.Build(
+            [Doc("known-anonymous-album", "匿名歌曲", "", "已识别匿名专辑") with { AlbumId = persistentAlbumId }], 73, false)
+            .Search("已识别匿名专辑", 114).Albums.Items.Single();
+        check(knownAlbumWithoutArtist.Id == persistentAlbumId,
+            "未知专辑艺人时搜索仍保留显式持久专辑ID，点击导航不追加SongId改变身份");
         check(albums.Albums.Items.Count == 2 && albums.Albums.Items.Select(hit => hit.Id).Distinct().Count() == 2
             && albums.Songs.Items.Any(hit => hit.GroupId == "album-a") && albums.Songs.Items.Any(hit => hit.GroupId == "album-b"),
             "同名不同艺人的两张专辑身份独立，专辑名同时召回本地歌曲");

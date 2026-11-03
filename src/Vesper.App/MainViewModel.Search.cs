@@ -130,6 +130,7 @@ public sealed partial class MainViewModel
 
     private IReadOnlyList<SearchDocument> CaptureSearchDocuments()
     {
+        ReconcileCatalog();
         var documents = new SearchDocument[Library.Songs.Count];
         for (int i = 0; i < documents.Length; i++)
         {
@@ -141,8 +142,14 @@ public sealed partial class MainViewModel
             // identities. Core maps each SongId to one stable single-member group.
             // In particular, do not parse filenames into fields that the UI does not
             // display, and never refill a correction's explicitly cleared artist/album.
+            var album = Library.Catalog.GetSongAlbum(song.Id);
             documents[i] = new(song.Id, effective.Title, effective.Artist, effective.Album,
-                availability.GetValueOrDefault(song.Id)) { Resources = Array.AsReadOnly(resources) };
+                availability.GetValueOrDefault(song.Id))
+            {
+                Resources = Array.AsReadOnly(resources), AlbumId = album?.Id,
+                AlbumArtist = album?.Artist ?? "",
+                Artists = Library.Catalog.GetSongArtists(song.Id).Select(artist => new SearchArtistCredit(artist.Name, artist.Id)).ToArray()
+            };
         }
         return Array.AsReadOnly(documents);
     }

@@ -98,6 +98,7 @@ public sealed partial class MainWindow : Window
         {
             libraryInitialized = true;
             await viewModel.InitializeAsync();
+            if (!closed) StartLibraryEnrichment();
             if (!closed && Environment.GetEnvironmentVariable("VESPER_PREVIEW_PAGE") is "曲库" or "收藏" &&
                 Navigation.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(item =>
                     (string)item.Tag == Environment.GetEnvironmentVariable("VESPER_PREVIEW_PAGE")) is { } previewItem)
@@ -185,28 +186,30 @@ public sealed partial class MainWindow : Window
         }
         finally { changingSelection = false; }
         PageTitle.Text = request.SongId is not null ? "歌曲详情" : page;
-        bool overview = request.SongId is null && page is ("首页" or "曲库" or "收藏" or "创作");
+        bool overview = request.EntityId is not null || request.SongId is null && page is ("首页" or "曲库" or "收藏" or "创作");
         PageHeading.Visibility = overview ? Visibility.Collapsed : Visibility.Visible;
         PageArea.Padding = overview ? new Thickness(0) : new Thickness(28, 24, 28, 24);
         LibraryActions.Visibility = page == "曲库" ? Visibility.Visible : Visibility.Collapsed;
-        SongFeedbackPanel.Visibility = page is "曲库" or "收藏" or "搜索" || request.SongId is not null ? Visibility.Visible : Visibility.Collapsed;
+        SongFeedbackPanel.Visibility = page is "曲库" or "收藏" or "搜索" || request.SongId is not null || request.EntityId is not null ? Visibility.Visible : Visibility.Collapsed;
         BackButton.IsEnabled = ContentFrame.CanGoBack;
         ForwardButton.IsEnabled = ContentFrame.CanGoForward;
         OnSearchPageNavigated(page);
         DispatcherQueue.TryEnqueue(UpdateTitleLayout);
     }
 
-    internal void AttachPageContent(ShellPage page, string key, string? songId)
+    internal void AttachPageContent(ShellPage page, string key, string? songId, string? entityId = null, bool isAlbum = false)
     {
-        PrepareOverviewBackground(key, songId);
         if (!pageContent.TryGetValue(key, out FrameworkElement? content))
         {
             content = songId is not null ? new SongDetailsView(this, songId)
+                : entityId is not null ? CreateEntityDetails(key, entityId, isAlbum)
                 : key switch { "首页" => HomePage, "曲库" => LibraryPage, "收藏" => FavoritesPage, "创作" => CreationPage, "设置" => AppearancePanel, "搜索" => SearchResults, _ => new Grid() };
             PageStorage.Children.Remove(content);
             pageContent[key] = content;
         }
         if (pageOwners.TryGetValue(key, out ShellPage? previous)) previous.Content = null;
+        if (content is EntityDetailsView entity && entityId is not null) RefreshEntityDetails(entity, entityId, isAlbum);
+        PrepareOverviewBackground(key, songId);
         content.Visibility = Visibility.Visible;
         if (songId is null) content.DataContext = viewModel;
         page.Content = content;

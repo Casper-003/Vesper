@@ -31,7 +31,8 @@ public sealed partial class AdditionalSongSources
             var entry = group?.GroupBy(item => Math.Round(item.Duration / 5)).OrderByDescending(items => items.Count()).First().First();
             if (entry is not null) { artist = entry.Match.Artist; duration = entry.Duration; }
         }
-        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or System.Text.Json.JsonException) { }
+        catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException
+            || ex is OperationCanceledException && !token.IsCancellationRequested) { }
         token.ThrowIfCancellationRequested();
         string query = artist.Length > 0 ? artist + " - " + title : title;
         string durationQuery = duration > 0 ? "&duration=" + (long)(duration * 1000) : "";

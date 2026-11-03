@@ -44,8 +44,8 @@ public sealed partial class MainViewModel
         return new(fileName, Library.Details.GetValueOrDefault(item.Song.Id) ?? new());
     }
 
-    public Task<bool> SaveAutomaticLookupAsync(string id, SongLookupInput expected, SongLookupResult result) => SaveDetailsAsync(id,
-        current => GetLookupInput(id)?.Key == expected.Key && current.Online == expected.Details.Online
+    public Task<bool> SaveAutomaticLookupAsync(string id, SongLookupInput expected, SongLookupResult result, Func<bool>? canPublish = null) => SaveDetailsAsync(id,
+        current => (canPublish?.Invoke() ?? true) && GetLookupInput(id)?.Key == expected.Key && current.Online == expected.Details.Online
             ? current with
             {
                 Online = current.Online is null || current.Online.SourceUrl.Contains("lrclib.net", StringComparison.OrdinalIgnoreCase)
@@ -131,6 +131,7 @@ public sealed partial class MainViewModel
             {
                 await Store.SaveAsync(Library);
                 if (message is not null) Status = message;
+                LibrarySourcesChanged?.Invoke(this, EventArgs.Empty);
                 return true;
             }
             catch (Exception ex)
@@ -145,6 +146,7 @@ public sealed partial class MainViewModel
                 RefreshDetailsPresentation();
                 AnnounceSearchIndexBuild(indexStarted);
                 ReportProblem($"歌曲资料保存失败：{ex.Message}");
+                LibrarySourcesChanged?.Invoke(this, EventArgs.Empty);
                 return false;
             }
         }

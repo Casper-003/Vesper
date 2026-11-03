@@ -45,11 +45,12 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
         get => busy;
         private set { if (busy == value) return; busy = value; Notify(); Notify(nameof(Idle)); Notify(nameof(HasBackgroundActivity)); NotifyActivity(); NotifyState(); }
     }
-    public bool HasBackgroundActivity => Busy || metadataReads > 0;
+    public bool HasBackgroundActivity => Busy || metadataReads > 0 || enrichmentBusy;
     public bool Idle => !HasBackgroundActivity;
-    public string ActivityLabel => Busy ? activityDetail : metadataReads > 0 ? "读取歌曲资料" : HasProblem ? "需要注意" : "就绪";
+    public string ActivityLabel => Busy ? activityDetail : enrichmentBusy ? enrichmentLabel : metadataReads > 0 ? "读取歌曲资料" : HasProblem ? "需要注意" : "就绪";
     public string ActivityGlyph => HasProblem ? "\uE7BA" : "\uE73E";
     public string ActivityTooltip => Busy ? $"{activityDetail}。可继续添加文件夹、管理目录和点歌。"
+        : enrichmentBusy ? enrichmentTooltip
         : metadataReads > 0 ? "正在读取歌曲资料或检索歌词，界面可继续操作。"
         : HasProblem ? Problem : LastScanStatistics is { } stats
         ? $"上次检查 {stats.Files} 个文件，用时 {stats.Elapsed.TotalSeconds:F2} 秒；完整核对 {stats.HashedFiles} 个文件，读取 {stats.HashedBytes / 1048576d:F1} MB。"
@@ -152,6 +153,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
                 indexStarted = MarkSearchIndexDirty();
             }
             RebuildDirectories(); Filter();
+            LibrarySourcesChanged?.Invoke(this, EventArgs.Empty);
             AnnounceSearchIndexBuild(indexStarted);
             await RefreshAsync();
         }
@@ -219,6 +221,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
                     Queue.RemapSongIds(scan.Aliases);
                     LastScanStatistics = scan.Statistics;
                     Filter(); RebuildDirectories();
+                    LibrarySourcesChanged?.Invoke(this, EventArgs.Empty);
                     AnnounceSearchIndexBuild(indexStarted);
                     activityDetail = "正在保存曲库"; NotifyActivity();
                     await Store.SaveAsync(Library);
@@ -273,6 +276,7 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
             indexStarted = MarkSearchIndexDirty();
         }
         Filter(); DirectoriesChanged();
+        LibrarySourcesChanged?.Invoke(this, EventArgs.Empty);
         AnnounceSearchIndexBuild(indexStarted);
         await PersistAsync();
         await RefreshAsync();
@@ -404,6 +408,9 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
             bool available = availability.GetValueOrDefault(song.Id);
             item.Update(song, Library.Favorites.Contains(song.Id), available);
             item.ApplyDetails(Library.Details.GetValueOrDefault(song.Id) ?? new());
+            var savedLocal = Library.Details.GetValueOrDefault(song.Id);
+            if (savedLocal?.LocalReadKey.Length > 0 && savedLocal.LocalReadKey == EnrichmentSourceKey(song))
+            { item.MetadataLoaded = true; item.Resolution = savedLocal.LocalResolution; }
             if (available) availableCount++;
             if (!HideUnavailable || available) desired.Add(item);
         }
@@ -509,5 +516,5 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
             nameof(DirectorySummary), nameof(LibrarySummary), nameof(EmptyMessage), nameof(EmptyHint) }) Notify(property);
     }
     private void Notify([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new(name));
-    public void Dispose() { DisposeSearchIndex(); scanCancellation?.Cancel(); }
+    public void Dispose() { DisposeSearchIndex(); backgroundMetadataLifetime.Cancel(); scanCancellation?.Cancel(); }
 }
