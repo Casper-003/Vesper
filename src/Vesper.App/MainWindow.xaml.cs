@@ -53,6 +53,7 @@ public sealed partial class MainWindow : Window
         AppWindow.Resize(new SizeInt32(1200, 800));
         ApplyWindowMinimumSize(1);
         Navigation.IsPaneOpen = preferences.PaneOpen;
+        Navigation.Loaded += OnSearchNavigationLoaded;
         activityDisplay.IsPaneOpen = Navigation.IsPaneOpen;
         Navigation.SelectedItem = HomeItem;
         if (Navigation.SettingsItem is NavigationViewItem settingsItem) settingsItem.Content = "设置";
@@ -63,6 +64,7 @@ public sealed partial class MainWindow : Window
         {
             if (!ready) return;
             activityDisplay.IsPaneOpen = Navigation.IsPaneOpen;
+            BeginSearchGlyphTransition();
             SavePreferences();
         });
         systemUi.ColorValuesChanged += OnSystemColorsChanged;

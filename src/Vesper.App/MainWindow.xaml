@@ -169,8 +169,10 @@
         <Thickness x:Key="NavigationViewContentMargin">0,0,4,4</Thickness>
       </NavigationView.Resources>
       <NavigationView.AutoSuggestBox>
-        <AutoSuggestBox x:Name="GlobalSearchBox" PlaceholderText="搜索曲库" QueryIcon="Find"
-            AutomationProperties.Name="搜索曲库"/>
+        <AutoSuggestBox x:Name="GlobalSearchBox" PlaceholderText="搜索曲库"
+            AutomationProperties.Name="搜索曲库">
+          <AutoSuggestBox.QueryIcon><FontIcon x:Name="SearchQueryGlyph" Glyph="&#xE721;" FontSize="16"/></AutoSuggestBox.QueryIcon>
+        </AutoSuggestBox>
       </NavigationView.AutoSuggestBox>
       <NavigationView.MenuItems>
         <NavigationViewItem x:Name="HomeItem" Content="首页" Tag="首页" Icon="Home"/>
@@ -386,6 +388,12 @@
       </Grid>
       </Grid>
     </NavigationView>
+    <Canvas Grid.RowSpan="2" IsHitTestVisible="False" AutomationProperties.AccessibilityView="Raw">
+      <FontIcon x:Name="SearchMovingGlyph" Glyph="&#xE721;" FontSize="16" Width="20" Height="20"
+          Foreground="{ThemeResource NavigationViewItemForeground}" Visibility="Collapsed" AutomationProperties.AccessibilityView="Raw">
+        <FontIcon.RenderTransform><TranslateTransform x:Name="SearchGlyphPosition"/></FontIcon.RenderTransform>
+      </FontIcon>
+    </Canvas>
     <Canvas x:Name="QueueFlightLayer" Grid.RowSpan="2" IsHitTestVisible="False"/>
     <StackPanel Grid.Row="1" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="16,0,16,20" Spacing="8">
       <InfoBar x:Name="QueueSaveWarning" MaxWidth="520" Severity="Warning" IsOpen="False" IsClosable="False"/>
