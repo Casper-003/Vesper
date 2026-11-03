@@ -168,9 +168,14 @@
         <CornerRadius x:Key="NavigationViewContentGridCornerRadius">8</CornerRadius>
         <Thickness x:Key="NavigationViewContentMargin">0,0,4,4</Thickness>
       </NavigationView.Resources>
+      <NavigationView.AutoSuggestBox>
+        <AutoSuggestBox x:Name="GlobalSearchBox" PlaceholderText="搜索曲库"
+            AutomationProperties.Name="搜索曲库">
+          <AutoSuggestBox.QueryIcon><FontIcon x:Name="SearchQueryGlyph" Glyph="&#xE721;" FontSize="16"/></AutoSuggestBox.QueryIcon>
+        </AutoSuggestBox>
+      </NavigationView.AutoSuggestBox>
       <NavigationView.MenuItems>
         <NavigationViewItem x:Name="HomeItem" Content="首页" Tag="首页" Icon="Home"/>
-        <NavigationViewItem Content="搜索" Tag="搜索" Icon="Find"/>
         <NavigationViewItem Content="收藏" Tag="收藏" Icon="Favorite"/>
         <NavigationViewItem Content="曲库" Tag="曲库" Icon="Library"/>
         <NavigationViewItem Content="创作" Tag="创作" Icon="Edit"/>
@@ -189,6 +194,10 @@
         <Grid x:Name="PageHeading" ColumnSpacing="20" MinHeight="36">
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
           <TextBlock x:Name="PageTitle" Text="首页" Style="{StaticResource TitleTextBlockStyle}" VerticalAlignment="Center"/>
+        </Grid>
+        <Grid x:Name="OverviewBackdrop" Grid.Row="1" VerticalAlignment="Top" Visibility="Collapsed"
+            IsHitTestVisible="False" Background="{StaticResource OverviewSystemAccentBrush}">
+          <Border Background="#33000000"/>
         </Grid>
         <Frame x:Name="ContentFrame" Grid.Row="1" Navigated="OnFrameNavigated">
           <Frame.ContentTransitions><TransitionCollection><NavigationThemeTransition/></TransitionCollection></Frame.ContentTransitions>
@@ -379,6 +388,12 @@
       </Grid>
       </Grid>
     </NavigationView>
+    <Canvas Grid.RowSpan="2" IsHitTestVisible="False" AutomationProperties.AccessibilityView="Raw">
+      <FontIcon x:Name="SearchMovingGlyph" Glyph="&#xE721;" FontSize="16" Width="20" Height="20"
+          Foreground="{ThemeResource NavigationViewItemForeground}" Visibility="Collapsed" AutomationProperties.AccessibilityView="Raw">
+        <FontIcon.RenderTransform><TranslateTransform x:Name="SearchGlyphPosition"/></FontIcon.RenderTransform>
+      </FontIcon>
+    </Canvas>
     <Canvas x:Name="QueueFlightLayer" Grid.RowSpan="2" IsHitTestVisible="False"/>
     <StackPanel Grid.Row="1" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="16,0,16,20" Spacing="8">
       <InfoBar x:Name="QueueSaveWarning" MaxWidth="520" Severity="Warning" IsOpen="False" IsClosable="False"/>

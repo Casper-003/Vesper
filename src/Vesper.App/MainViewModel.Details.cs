@@ -65,10 +65,16 @@ public sealed partial class MainViewModel
         var current = FindSong(item.Song.Id);
         if (disposed || ReadOnly || current is null || !current.Song.Sources.Contains(path, StringComparer.OrdinalIgnoreCase)) return;
         string id = current.Song.Id;
-        SongDetails previous = Library.Details.GetValueOrDefault(id) ?? new();
-        Library.Details[id] = previous with { Local = metadata };
+        bool indexStarted;
+        lock (searchIndexGate)
+        {
+            SongDetails previous = Library.Details.GetValueOrDefault(id) ?? new();
+            Library.Details[id] = previous with { Local = metadata };
+            indexStarted = MarkSearchIndexDirty();
+        }
         bool titleChanged = current.Title != Library.Details[id].Effective(current.Song.Title).Title;
         current.ApplyDetails(Library.Details[id]);
+        AnnounceSearchIndexBuild(indexStarted);
         if (titleChanged) RefreshDetailsPresentation();
     }
 
@@ -112,9 +118,15 @@ public sealed partial class MainViewModel
             SongDetails previous = Library.Details.GetValueOrDefault(id) ?? new();
             SongDetails updated = change(previous);
             if (updated == previous) return false;
-            Library.Details[id] = updated;
+            bool indexStarted;
+            lock (searchIndexGate)
+            {
+                Library.Details[id] = updated;
+                indexStarted = MarkSearchIndexDirty();
+            }
             FindSong(id)?.ApplyDetails(updated);
             RefreshDetailsPresentation();
+            AnnounceSearchIndexBuild(indexStarted);
             try
             {
                 await Store.SaveAsync(Library);
@@ -124,9 +136,14 @@ public sealed partial class MainViewModel
             catch (Exception ex)
             {
                 id = ResolveSongId(id);
-                Library.Details[id] = rollback(Library.Details.GetValueOrDefault(id) ?? new(), previous, updated);
+                lock (searchIndexGate)
+                {
+                    Library.Details[id] = rollback(Library.Details.GetValueOrDefault(id) ?? new(), previous, updated);
+                    indexStarted = MarkSearchIndexDirty();
+                }
                 FindSong(id)?.ApplyDetails(Library.Details[id]);
                 RefreshDetailsPresentation();
+                AnnounceSearchIndexBuild(indexStarted);
                 ReportProblem($"歌曲资料保存失败：{ex.Message}");
                 return false;
             }

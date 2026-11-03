@@ -9,6 +9,7 @@
   <ItemGroup>
     <Compile Include="../../src/Vesper.App/MainViewModel.cs" Link="App/MainViewModel.cs" />
     <Compile Include="../../src/Vesper.App/MainViewModel.Details.cs" Link="App/MainViewModel.Details.cs" />
+    <Compile Include="../../src/Vesper.App/MainViewModel.Search.cs" Link="App/MainViewModel.Search.cs" />
     <Compile Include="../../src/Vesper.App/LibraryPresentation.cs" Link="App/LibraryPresentation.cs" />
     <Compile Include="../../src/Vesper.App/ShellPreferences.cs" Link="App/ShellPreferences.cs" />
     <Compile Include="../../src/Vesper.App/ActivityStatusPresenter.cs" Link="App/ActivityStatusPresenter.cs" />

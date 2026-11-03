@@ -43,6 +43,7 @@ public sealed partial class MainWindow : Window
         PageArea.DataContext = viewModel;
         InitializeLibraryPresentation();
         InitializeQueuePresentation();
+        InitializeSearchPresentation();
         viewModel.HideUnavailable = preferences.HideUnavailable;
         SystemBackdrop = new MicaBackdrop();
         ExtendsContentIntoTitleBar = true;
@@ -53,6 +54,7 @@ public sealed partial class MainWindow : Window
         AppWindow.Resize(new SizeInt32(1200, 800));
         ApplyWindowMinimumSize(1);
         Navigation.IsPaneOpen = preferences.PaneOpen;
+        Navigation.Loaded += OnSearchNavigationLoaded;
         activityDisplay.IsPaneOpen = Navigation.IsPaneOpen;
         Navigation.SelectedItem = HomeItem;
         if (Navigation.SettingsItem is NavigationViewItem settingsItem) settingsItem.Content = "设置";
@@ -63,10 +65,11 @@ public sealed partial class MainWindow : Window
         {
             if (!ready) return;
             activityDisplay.IsPaneOpen = Navigation.IsPaneOpen;
+            BeginSearchGlyphTransition();
             SavePreferences();
         });
         systemUi.ColorValuesChanged += OnSystemColorsChanged;
-        Closed += (_, _) => { closed = true; responsivenessTrace?.Dispose(); systemUi.ColorValuesChanged -= OnSystemColorsChanged; CloseQueuePresentation(); CloseOverviewScrollbars(); CloseLibraryPresentation(); };
+        Closed += (_, _) => { closed = true; responsivenessTrace?.Dispose(); systemUi.ColorValuesChanged -= OnSystemColorsChanged; CloseSearchPresentation(); CloseQueuePresentation(); CloseOverviewScrollbars(); CloseLibraryPresentation(); };
         Activated += (_, _) => ApplyTheme();
         ContentFrame.Navigate(typeof(ShellPage), new ShellNavigationRequest("首页", this), new EntranceNavigationTransitionInfo());
     }
@@ -76,6 +79,11 @@ public sealed partial class MainWindow : Window
         if (Navigation.SettingsItem is NavigationViewItem settingsItem) settingsItem.Content = "设置";
         ApplyTheme(); UpdateTitleLayout();
         if (!canSave) PreferenceNotice.IsOpen = true;
+        if (Environment.GetEnvironmentVariable("VESPER_SEARCH_CHECK_PATH") is { Length: > 0 } searchCheckPath)
+        {
+            if (!libraryInitialized) { libraryInitialized = true; await RunSearchRuntimeChecksAsync(searchCheckPath); }
+            return;
+        }
         if (Environment.GetEnvironmentVariable("VESPER_QUEUE_CHECK_PATH") is { Length: > 0 } queueCheckPath)
         {
             if (!libraryInitialized) { libraryInitialized = true; await RunQueueRuntimeChecksAsync(queueCheckPath); }
@@ -181,18 +189,20 @@ public sealed partial class MainWindow : Window
         PageHeading.Visibility = overview ? Visibility.Collapsed : Visibility.Visible;
         PageArea.Padding = overview ? new Thickness(0) : new Thickness(28, 24, 28, 24);
         LibraryActions.Visibility = page == "曲库" ? Visibility.Visible : Visibility.Collapsed;
-        SongFeedbackPanel.Visibility = page is "曲库" or "收藏" || request.SongId is not null ? Visibility.Visible : Visibility.Collapsed;
+        SongFeedbackPanel.Visibility = page is "曲库" or "收藏" or "搜索" || request.SongId is not null ? Visibility.Visible : Visibility.Collapsed;
         BackButton.IsEnabled = ContentFrame.CanGoBack;
         ForwardButton.IsEnabled = ContentFrame.CanGoForward;
+        OnSearchPageNavigated(page);
         DispatcherQueue.TryEnqueue(UpdateTitleLayout);
     }
 
     internal void AttachPageContent(ShellPage page, string key, string? songId)
     {
+        PrepareOverviewBackground(key, songId);
         if (!pageContent.TryGetValue(key, out FrameworkElement? content))
         {
             content = songId is not null ? new SongDetailsView(this, songId)
-                : key switch { "首页" => HomePage, "曲库" => LibraryPage, "收藏" => FavoritesPage, "创作" => CreationPage, "设置" => AppearancePanel, _ => new Grid() };
+                : key switch { "首页" => HomePage, "曲库" => LibraryPage, "收藏" => FavoritesPage, "创作" => CreationPage, "设置" => AppearancePanel, "搜索" => SearchResults, _ => new Grid() };
             PageStorage.Children.Remove(content);
             pageContent[key] = content;
         }

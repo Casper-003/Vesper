@@ -148,6 +148,7 @@ public sealed partial class MainWindow
         if (existing is not null)
         {
             UpdateOverviewTitleLayout(existing, title, page.ActualWidth - titleMotion.Margin.Left - 32, height);
+            SyncOverviewBackground(list);
             return;
         }
         var visual = ElementCompositionPreview.GetElementVisual(hero);
@@ -188,6 +189,7 @@ public sealed partial class MainWindow
             ElementCompositionPreview.GetElementVisual(LibraryActions).StartAnimation("Translation.Y",
                 Expression($"metrics.Height * (1 - ({progress}))"));
         }
+        SyncOverviewBackground(list);
     }
 
     private static void UpdateOverviewTitleLayout(OverviewMotion motion, TextBlock title, double availableWidth, float height)
