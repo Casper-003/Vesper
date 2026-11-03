@@ -207,15 +207,15 @@
           <ListView x:Name="HomeOverview" Margin="24,48,24,12" SelectionMode="None" ScrollViewer.IsScrollInertiaEnabled="True" ScrollViewer.IsDeferredScrollingEnabled="False" ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollMode="Enabled" ScrollViewer.VerticalScrollBarVisibility="Hidden" Loaded="OnOverviewLoaded">
             <ListView.Header><Grid x:Name="HomeHeaderSpace" Height="280"/></ListView.Header>
             <ListView.Footer>
-          <StackPanel x:Name="HomeLibraryGuide" Margin="24,32,24,32" HorizontalAlignment="Center" MaxWidth="520" Spacing="20" Visibility="{Binding ShowHomeHint, Converter={StaticResource BoolVisibility}}">
-            <FontIcon Glyph="&#xE8F1;" FontSize="48" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-            <TextBlock Text="还没有可用的歌曲" FontSize="28" FontWeight="SemiBold" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap"/>
-            <TextBlock Text="先把电脑中的歌曲或 MV 所在文件夹加入曲库。Vesper 会收录其中的本地媒体，文件仍保留在原位置。" FontSize="16" TextWrapping="Wrap" TextAlignment="Center"/>
-            <StackPanel Spacing="14" Margin="12,0">
-              <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><FontIcon Glyph="&#xE8F1;" FontSize="18" VerticalAlignment="Top" Margin="0,3,0,0"/><TextBlock Grid.Column="1" Text="1. 打开左侧导航的“曲库”页面。" FontSize="16" TextWrapping="Wrap"/></Grid>
-              <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><FontIcon Glyph="&#xE8F4;" FontSize="18" VerticalAlignment="Top" Margin="0,3,0,0"/><TextBlock Grid.Column="1" Text="2. 点击页面右上角的文件夹加号，选择歌曲所在目录。" FontSize="16" TextWrapping="Wrap"/></Grid>
+          <StackPanel x:Name="HomeLibraryGuide" Margin="0,32,0,32" HorizontalAlignment="Left" MaxWidth="520" Spacing="20" Visibility="{Binding ShowHomeHint, Converter={StaticResource BoolVisibility}}">
+            <FontIcon Glyph="&#xE8F1;" FontSize="48" HorizontalAlignment="Left" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+            <TextBlock Text="还没有可用的歌曲" FontSize="28" FontWeight="SemiBold" TextAlignment="Left" TextWrapping="Wrap"/>
+            <TextBlock Text="先把电脑中的歌曲或 MV 所在文件夹加入曲库。Vesper 会收录其中的本地媒体，文件仍保留在原位置。" FontSize="16" TextWrapping="Wrap" TextAlignment="Left"/>
+            <StackPanel Spacing="14">
+              <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><FontIcon Glyph="&#xE8F1;" FontSize="18" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,3,0,0"/><TextBlock Grid.Column="1" Text="1. 打开左侧导航的“曲库”页面。" FontSize="16" TextWrapping="Wrap"/></Grid>
+              <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><FontIcon Glyph="&#xE8F4;" FontSize="18" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,3,0,0"/><TextBlock Grid.Column="1" Text="2. 点击页面右上角的文件夹加号，选择歌曲所在目录。" FontSize="16" TextWrapping="Wrap"/></Grid>
             </StackPanel>
-            <TextBlock Text="导入后，你可以在曲库中浏览、收藏歌曲，并将它们加入待播。" FontSize="15" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" TextAlignment="Center"/>
+            <TextBlock Text="导入后，你可以在曲库中浏览、收藏歌曲，并将它们加入待播。" FontSize="15" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" TextAlignment="Left"/>
           </StackPanel>
             </ListView.Footer>
           </ListView>
@@ -235,6 +235,13 @@
             <Grid Background="{StaticResource OverviewSystemAccentBrush}"><Border Background="#33000000"/></Grid>
             <Canvas x:Name="CreationTitleMotion" Margin="32,0,0,0"><TextBlock x:Name="CreationTitleBold" Canvas.Left="0" Text="Create" FontSize="96" LineHeight="116" FontWeight="Bold" Foreground="White"/></Canvas>
           </Grid>
+          <ScrollViewer x:Name="CreationEmptyState" Margin="24,284,24,24" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center">
+            <StackPanel MaxWidth="320" Spacing="8" Margin="0,12" HorizontalAlignment="Left">
+              <FontIcon Glyph="&#xE70F;" FontSize="36" Margin="0,0,0,8" HorizontalAlignment="Left" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+              <TextBlock Text="编辑演唱作品" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap" TextAlignment="Left"/>
+              <TextBlock Text="功能尚未开放" FontSize="14" TextWrapping="Wrap" TextAlignment="Left" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+            </StackPanel>
+          </ScrollViewer>
           <Grid x:Name="CreationScrollRail" Width="16" HorizontalAlignment="Right" Background="Transparent" Visibility="Collapsed">
             <primitives:ScrollBar x:Name="CreationScrollBar" Margin="1,0" Orientation="Vertical" IndicatorMode="None" IsTabStop="False" AutomationProperties.Name="创作滚动条"/>
           </Grid>
@@ -296,11 +303,13 @@
               <FontIcon Glyph="&#xE72C;" FontSize="16"/>
             </Button>
           </StackPanel>
-            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8" Visibility="{Binding HasNoResults, Converter={StaticResource BoolVisibility}}">
-              <FontIcon Glyph="&#xE8F1;" FontSize="40" Margin="0,0,0,16" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-              <TextBlock Text="{Binding EmptyMessage}" HorizontalAlignment="Center" FontSize="18"/>
-              <TextBlock Text="{Binding EmptyHint}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="400"/>
-            </StackPanel>
+            <ScrollViewer x:Name="LibraryEmptyState" Margin="24,336,24,24" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center" Visibility="{Binding HasNoResults, Converter={StaticResource BoolVisibility}}">
+              <StackPanel MaxWidth="320" Spacing="8" Margin="0,12" HorizontalAlignment="Left">
+                <FontIcon Glyph="&#xE8F1;" FontSize="36" Margin="0,0,0,8" HorizontalAlignment="Left" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                <TextBlock Text="{Binding EmptyMessage}" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap" TextAlignment="Left"/>
+                <TextBlock Text="{Binding EmptyHint}" FontSize="14" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" TextAlignment="Left"/>
+              </StackPanel>
+            </ScrollViewer>
             <Grid x:Name="LibraryScrollRail" Width="16" HorizontalAlignment="Right" Background="Transparent" Visibility="Collapsed">
               <primitives:ScrollBar x:Name="LibraryScrollBar" Margin="1,0" Orientation="Vertical" IndicatorMode="None" IsTabStop="False" AutomationProperties.Name="曲库滚动条"/>
             </Grid>
@@ -319,11 +328,13 @@
             </Grid>
             <Canvas x:Name="FavoriteTitleMotion" Margin="32,0,0,0"><TextBlock x:Name="FavoriteTitleBold" Canvas.Left="0" Text="Favourites" FontSize="96" LineHeight="116" FontWeight="Bold" Foreground="White"/></Canvas>
           </Grid>
-          <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12" MaxWidth="440" Visibility="{Binding HasNoFavorites, Converter={StaticResource BoolVisibility}}">
-            <FontIcon Glyph="&#xEB51;" FontSize="40" Margin="0,0,0,12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-            <TextBlock Text="{Binding FavoriteEmptyMessage}" FontSize="22" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center"/>
-            <TextBlock Text="{Binding FavoriteEmptyHint}" FontSize="16" TextWrapping="Wrap" TextAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-          </StackPanel>
+          <ScrollViewer x:Name="FavoriteEmptyState" Margin="24,284,24,24" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center" Visibility="{Binding HasNoFavorites, Converter={StaticResource BoolVisibility}}">
+            <StackPanel MaxWidth="320" Spacing="8" Margin="0,12" HorizontalAlignment="Left">
+              <FontIcon Glyph="&#xEB51;" FontSize="36" Margin="0,0,0,8" HorizontalAlignment="Left" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+              <TextBlock Text="{Binding FavoriteEmptyMessage}" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap" TextAlignment="Left"/>
+              <TextBlock Text="{Binding FavoriteEmptyHint}" FontSize="14" TextWrapping="Wrap" TextAlignment="Left" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+            </StackPanel>
+          </ScrollViewer>
           <Grid x:Name="FavoriteScrollRail" Width="16" HorizontalAlignment="Right" Background="Transparent" Visibility="Collapsed">
             <primitives:ScrollBar x:Name="FavoriteScrollBar" Margin="1,0" Orientation="Vertical" IndicatorMode="None" IsTabStop="False" AutomationProperties.Name="收藏滚动条"/>
           </Grid>
@@ -369,11 +380,13 @@
             </StackPanel>
             <Grid Grid.Row="2">
               <ListView x:Name="QueueSongs" Padding="0,0,34,0" SelectionMode="None" HorizontalContentAlignment="Stretch" ItemContainerStyle="{StaticResource SongRowStyle}" ItemTemplate="{StaticResource QueueRowTemplate}" ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled" PointerMoved="OnQueueDragPointerMoved" PointerReleased="OnQueueDragPointerReleased" PointerCanceled="OnQueueDragPointerCanceled" PointerCaptureLost="OnQueueDragPointerCaptureLost"><ListView.ItemContainerTransitions><TransitionCollection/></ListView.ItemContainerTransitions></ListView>
-              <StackPanel x:Name="QueueEmpty" Margin="0,0,34,0" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="12" MaxWidth="250">
-                <FontIcon Glyph="&#xE8EF;" FontSize="36" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                <TextBlock x:Name="QueueEmptyTitle" Text="还没有待播歌曲" FontSize="18" TextWrapping="Wrap" TextAlignment="Center"/>
-                <TextBlock Text="点击歌曲旁的 ＋ 加入待播" FontSize="14" TextWrapping="Wrap" TextAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-              </StackPanel>
+              <ScrollViewer x:Name="QueueEmpty" Margin="12,12,46,12" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center">
+                <StackPanel MaxWidth="280" Spacing="8" Margin="0,12" HorizontalAlignment="Left">
+                  <FontIcon Glyph="&#xE8EF;" FontSize="36" Margin="0,0,0,8" HorizontalAlignment="Left" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                  <TextBlock x:Name="QueueEmptyTitle" Text="暂无待播" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap" TextAlignment="Left"/>
+                  <TextBlock Text="点击歌曲旁的 ＋ 点歌" FontSize="14" TextWrapping="Wrap" TextAlignment="Left" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                </StackPanel>
+              </ScrollViewer>
             </Grid>
           </Grid>
         </Border>

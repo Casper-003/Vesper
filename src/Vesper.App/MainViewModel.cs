@@ -72,19 +72,19 @@ public sealed partial class MainViewModel : INotifyPropertyChanged, IDisposable
     public bool HasNoResults => initialized && Results.Count == 0;
     public bool HasNoFavorites => initialized && FavoriteResults.Count == 0;
     public string FavoriteEmptyMessage => ReadOnly ? "无法读取收藏"
-        : HasHiddenFavorites ? "收藏的歌曲暂不可用" : "还没有收藏歌曲";
-    public string FavoriteEmptyHint => ReadOnly ? "原曲库记录已保留，请查看下方的读取异常提示。"
-        : HasHiddenFavorites ? "重新连接歌曲目录并在“曲库”刷新；也可到“设置”关闭“隐藏不可用歌曲”，查看保留的收藏。"
-        : "在曲库中点击歌曲旁的心形，即可在这里找到它。";
+        : HasHiddenFavorites ? "收藏的歌曲暂不可用" : "暂无收藏";
+    public string FavoriteEmptyHint => ReadOnly ? "记录已保留，请查看下方错误提示。"
+        : HasHiddenFavorites ? "连接目录后刷新，或在设置中关闭“隐藏不可用歌曲”。"
+        : "在曲库点击心形收藏";
     private bool HasHiddenFavorites => HideUnavailable && Library.Songs.Any(song => Library.Favorites.Contains(song.Id));
     public string DirectorySummary => $"{Directories.Count} 个目录";
     public string LibrarySummary => $"{availableCount} 首可用 · {Results.Count} 首显示";
-    public string EmptyMessage => Busy ? "正在收录歌曲…" : ReadOnly ? "无法读取曲库，请查看下方提示。"
+    public string EmptyMessage => Busy ? "正在收录歌曲…" : ReadOnly ? "无法读取曲库"
         : Library.Directories.Count == 0 ? "尚未导入歌曲" : "没有可显示的歌曲";
-    public string EmptyHint => ReadOnly ? "原曲库记录已保留，读取异常见下方提示。"
-        : Busy ? "可以继续添加其他歌曲文件夹，后台会自动接着处理。"
-        : Library.Directories.Count == 0 ? "点击右上角的文件夹加号，选择本地歌曲或 MV 所在目录。"
-        : "用右上角的刷新图标重新检查文件；也可到“设置”关闭“隐藏不可用歌曲”，查看保留的记录。";
+    public string EmptyHint => ReadOnly ? "记录已保留，请查看下方错误提示。"
+        : Busy ? "可继续添加歌曲文件夹。"
+        : Library.Directories.Count == 0 ? "点击右上角文件夹加号，添加歌曲或 MV 目录。"
+        : "点击右上角刷新，或在设置中关闭“隐藏不可用歌曲”。";
     public bool HideUnavailable
     {
         get => hideUnavailable;

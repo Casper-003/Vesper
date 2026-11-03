@@ -140,7 +140,7 @@ public sealed partial class MainWindow
         QueueHeadingCount.Text = pending.Count.ToString(); QueueBadge.Text = pending.Count.ToString();
         UpdateQueueToggle();
         QueueEmpty.Visibility = pending.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        QueueEmptyTitle.Text = currentQueueRow is null ? "还没有待播歌曲" : "后面还没有待播歌曲";
+        QueueEmptyTitle.Text = currentQueueRow is null ? "暂无待播" : "暂无后续歌曲";
         if (queuePanelOpen) _ = CheckQueueAvailabilityAsync();
         ScheduleQueueRowSurfaceRefresh();
     }

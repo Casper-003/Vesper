@@ -143,6 +143,12 @@ public sealed partial class MainWindow
         hero.Height = height;
         bool library = ReferenceEquals(list, LibrarySongs);
         spacer.Height = height - 48 + (library ? 52 : 16);
+        // Vertically center left-aligned empty states below the hero, leaving the library toolbar clear.
+        ScrollViewer? emptyState = library ? LibraryEmptyState
+            : ReferenceEquals(list, FavoriteSongs) ? FavoriteEmptyState
+            : ReferenceEquals(list, CreationOverview) ? CreationEmptyState : null;
+        if (emptyState is not null)
+            emptyState.Margin = new Thickness(24, height + (library ? 52 : 0) + 24, 24, 24);
         if ((library || ReferenceEquals(list, FavoriteSongs)) && list.Footer is FrameworkElement footer)
             footer.Height = 0;
         if (existing is not null)
