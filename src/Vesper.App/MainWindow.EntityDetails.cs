@@ -62,7 +62,7 @@ public sealed partial class MainWindow
         if (!entityOverviews.ContainsKey(view.SongList)) entityOverviews[view.SongList] = view;
         view.SongList.ContainerContentChanging -= OnOverviewContainerChanging;
         view.SongList.ContainerContentChanging += OnOverviewContainerChanging;
-        ConfigureOverview(view.SongList);
+        ConfigureOverview(view.SongList, rebind: true);
     }
     internal void ConfigureEntityOverview(EntityDetailsView view) => ConfigureOverview(view.SongList);
 

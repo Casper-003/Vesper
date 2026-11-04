@@ -19,6 +19,7 @@ public sealed partial class MainWindow
         internal float HeaderHeight = float.NaN;
         internal double NativeTitleFontSize = double.NaN;
         internal string TitleText = "";
+        internal InsetClip? HeroClip;
     }
     private readonly Dictionary<ListView, OverviewMotion> overviewMotions = [];
     private bool stripeRefreshQueued;
@@ -123,7 +124,7 @@ public sealed partial class MainWindow
     private async void OnOverviewLoaded(object sender, RoutedEventArgs e)
     {
         if (sender is not ListView list) return;
-        ConfigureOverview(list);
+        ConfigureOverview(list, rebind: true);
         var song = ReferenceEquals(list, FavoriteSongs) ? viewModel.LatestFavorite
             : ReferenceEquals(list, LibrarySongs) ? viewModel.LibraryHero : null;
         if (song is not null) await LoadDetailsAsync(song);
@@ -133,12 +134,12 @@ public sealed partial class MainWindow
             : ReferenceEquals(sender, CreationPage) ? CreationOverview
             : ReferenceEquals(sender, FavoritesPage) ? FavoriteSongs : LibrarySongs);
 
-    private void ConfigureOverview(ListView list)
+    private void ConfigureOverview(ListView list, bool rebind = false)
     {
         var parts = GetOverviewParts(list);
         Grid page = parts.Page;
         overviewMotions.TryGetValue(list, out var existing);
-        var scroll = existing?.Viewer ?? FindChild<ScrollViewer>(list);
+        var scroll = FindChild<ScrollViewer>(list);
         if (page.ActualHeight <= 0 || page.ActualWidth <= 0 || scroll is null) return;
         ConfigureOverviewScrollbar(list, scroll);
         Grid hero = parts.Hero;
@@ -159,6 +160,7 @@ public sealed partial class MainWindow
             emptyState.Margin = new Thickness(24, height + (library ? 52 : 0) + 24, 24, 24);
         if ((library || ReferenceEquals(list, FavoriteSongs)) && list.Footer is FrameworkElement footer)
             footer.Height = 0;
+        bool refreshBindings = rebind || existing is not null && !ReferenceEquals(existing.Viewer, scroll);
         if (existing is not null)
         {
             existing.Metrics.InsertScalar("TitleLeftShift", (float)(entity is null ? 0 : Math.Max(0, titleMotion.Margin.Left - 32)));
@@ -177,21 +179,33 @@ public sealed partial class MainWindow
                 existing.TitleText = title.Text;
                 overviewMotions[list] = existing;
             }
-            UpdateOverviewTitleLayout(existing, title, page.ActualWidth - titleMotion.Margin.Left - 32, height, entity);
-            SyncOverviewBackground(list);
-            return;
+            if (!refreshBindings)
+            {
+                UpdateOverviewTitleLayout(existing, title, page.ActualWidth - titleMotion.Margin.Left - 32, height, entity);
+                var currentVisual = ElementCompositionPreview.GetElementVisual(hero);
+                if (existing.HeroClip is not null && !ReferenceEquals(currentVisual.Clip, existing.HeroClip))
+                    currentVisual.Clip = existing.HeroClip;
+                SyncOverviewBackground(list);
+                return;
+            }
+            existing.Viewer.ViewChanged -= OnOverviewViewChanged;
         }
         var visual = ElementCompositionPreview.GetElementVisual(hero);
         var compositor = visual.Compositor;
         var properties = ElementCompositionPreview.GetScrollViewerManipulationPropertySet(scroll);
-        var metrics = compositor.CreatePropertySet();
+        var metrics = existing?.Metrics ?? compositor.CreatePropertySet();
         metrics.InsertScalar("TitleLeftShift", (float)(entity is null ? 0 : Math.Max(0, titleMotion.Margin.Left - 32)));
         // Measure the typeface proportions once. Background changes set the native
         // text size; only scrolling scales that correctly sized text down.
-        title.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
-        var motion = new OverviewMotion(scroll, properties, metrics,
-            title.DesiredSize.Width / title.FontSize, title.DesiredSize.Height / title.FontSize,
-            title.LineHeight / title.FontSize);
+        OverviewMotion motion;
+        if (existing is null)
+        {
+            title.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+            motion = new(scroll, properties, metrics,
+                title.DesiredSize.Width / title.FontSize, title.DesiredSize.Height / title.FontSize,
+                title.LineHeight / title.FontSize);
+        }
+        else motion = existing with { Viewer = scroll, Scroll = properties };
         motion.TitleText = title.Text;
         overviewMotions[list] = motion;
         UpdateOverviewTitleLayout(motion, title, page.ActualWidth - titleMotion.Margin.Left - 32, height, entity);
@@ -204,7 +218,9 @@ public sealed partial class MainWindow
             animation.SetReferenceParameter("metrics", metrics);
             return animation;
         }
-        var clip = compositor.CreateInsetClip();
+        var clip = motion.HeroClip ??= compositor.CreateInsetClip();
+        clip.StopAnimation("BottomInset");
+        clip.BottomInset = (float)Math.Clamp(scroll.VerticalOffset, 0, Math.Max(0, height - 48));
         visual.Clip = clip;
         clip.StartAnimation("BottomInset", Expression($"({progress}) * (metrics.Height - 48)"));
         // Animate the shared title host through XAML facade properties, avoiding layout-owned offsets/scales.

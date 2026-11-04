@@ -32,7 +32,8 @@ public sealed partial class MainWindow : Window
         ShellPreferences preferences = new();
         try
         {
-            if (File.Exists(preferencesPath))
+            if (Environment.GetEnvironmentVariable("VESPER_NAVIGATION_CHECK_PATH") is { Length: > 0 }) canSave = false;
+            else if (File.Exists(preferencesPath))
                 preferences = JsonSerializer.Deserialize<ShellPreferences>(File.ReadAllText(preferencesPath)) ?? new();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
@@ -79,6 +80,11 @@ public sealed partial class MainWindow : Window
         if (Navigation.SettingsItem is NavigationViewItem settingsItem) settingsItem.Content = "设置";
         ApplyTheme(); UpdateTitleLayout();
         if (!canSave) PreferenceNotice.IsOpen = true;
+        if (Environment.GetEnvironmentVariable("VESPER_NAVIGATION_CHECK_PATH") is { Length: > 0 } navigationCheckPath)
+        {
+            if (!libraryInitialized) { libraryInitialized = true; await RunOverviewNavigationChecksAsync(navigationCheckPath); }
+            return;
+        }
         if (Environment.GetEnvironmentVariable("VESPER_SEARCH_CHECK_PATH") is { Length: > 0 } searchCheckPath)
         {
             if (!libraryInitialized) { libraryInitialized = true; await RunSearchRuntimeChecksAsync(searchCheckPath); }

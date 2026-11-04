@@ -79,9 +79,9 @@ public sealed partial class MainWindow
                 && Math.Abs(OverviewBackdrop.ActualHeight - LibraryHeroLayer.ActualHeight) < .5,
                 "the background must follow the active header's bound height.");
             Check(overviewBackdropClip is not null && !ReferenceEquals(overviewBackdropClip, heroClip)
-                && ReferenceEquals(overviewBackdropSourceClip, heroClip)
+                && ReferenceEquals(overviewBackdropMotion, motion)
                 && ReferenceEquals(ElementCompositionPreview.GetElementVisual(OverviewBackdrop).Clip, overviewBackdropClip),
-                "the background must read the original header clip through its own clip.");
+                "the background must use the same current scroll motion through its own clip.");
             // This left margin is below the 48-unit compact header, outside all
             // song rows. Real pixels must be unchanged when the backdrop is hidden.
             Point belowHeader = LibraryPage.TransformToVisual(Root).TransformPoint(new Point(8, 64));
@@ -94,7 +94,7 @@ public sealed partial class MainWindow
                 "the compact background leaked into the song-list margin below the header.");
 
             Navigate("设置");
-            Check(OverviewBackdrop.Visibility == Visibility.Collapsed && overviewBackdropList is null && overviewBackdropSourceClip is null,
+            Check(OverviewBackdrop.Visibility == Visibility.Collapsed && overviewBackdropList is null && overviewBackdropMotion is null,
                 "non-overview content must hide and disconnect the background.");
             // Exercise the actual navigation-selection path; do not substitute
             // Entrance for the already accepted Create suppression policy.
@@ -105,7 +105,7 @@ public sealed partial class MainWindow
                 "the existing Create navigation/sidebar behavior must remain intact.");
             Navigation.SelectedItem = Navigation.MenuItems.OfType<NavigationViewItem>().First(item => (string)item.Tag == "曲库");
             await Task.Delay(280);
-            Check(ReferenceEquals(overviewMotions[LibrarySongs], motion)
+            Check(ReferenceEquals(overviewMotions[LibrarySongs].Metrics, motion.Metrics)
                 && ReferenceEquals(ElementCompositionPreview.GetElementVisual(LibraryHeroLayer).Clip, heroClip)
                 && ReferenceEquals(LibraryTitleMotion, titleMotion) && ReferenceEquals(LibraryTitleBold, title)
                 && queueSidebarVisible && !queuePanelOpen,
