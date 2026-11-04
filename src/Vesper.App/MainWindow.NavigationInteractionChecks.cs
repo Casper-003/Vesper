@@ -20,6 +20,7 @@ public sealed partial class MainWindow
             throw new InvalidOperationException("Navigation interactions require the fresh isolated navigation runner.");
         int checks = 0, captures = 0, observedDirections = 0;
         var motionSamples = new List<object>();
+        var routeSamples = new List<object>();
         void Check(bool passed, string message)
         { checks++; if (!passed) failures.Add("Navigation interactions: " + message); }
         async Task Settle(int turns = 24)
@@ -129,14 +130,15 @@ public sealed partial class MainWindow
             "Unknown labels produced artificial entity links.");
         Check(automaticLookup is null && videoLookups.Count == 0, "The isolated checks started an online provider.");
 
-        // Probe native history and sample motion without treating snapshots
-        // that contain only the animation endpoint as direction evidence.
+        // Marker bodies isolate native transition selection. Detail requests use
+        // actual fixture identities; production has no special handling of these keys.
         var markers = new Dictionary<string, Border>();
         foreach (var (key, channel, color) in new[]
         {
             ("__slide-a", 2, Windows.UI.Color.FromArgb(255, 230, 0, 0)),
             ("__slide-b", 1, Windows.UI.Color.FromArgb(255, 0, 210, 0)),
-            ("__slide-c", 0, Windows.UI.Color.FromArgb(255, 0, 0, 230))
+            ("__slide-c", 0, Windows.UI.Color.FromArgb(255, 0, 0, 230)),
+            ("__slide-d", 0, Windows.UI.Color.FromArgb(255, 0, 0, 230))
         })
         {
             var marker = new Border { Width = 32, Height = 120, HorizontalAlignment = HorizontalAlignment.Left,
@@ -145,27 +147,44 @@ public sealed partial class MainWindow
             markers.Add(key, marker);
             var grid = new Grid(); grid.Children.Add(marker); pageContent.Add(key, grid);
         }
-        async Task<double?> MarkerLeft(Border marker)
+        ShellNavigationRequest RequestFor(string key) => key switch
+        {
+            "__slide-c" => new(key, this, SongId: songId),
+            "__slide-d" => new(key, this, EntityId: GetSongEntityLinks("navigation-other-release").Artists.Single().Id),
+            _ => new(key, this)
+        };
+        async Task<double?> MarkerPosition(Border marker, bool horizontal)
         {
             captures++;
             var capture = await CaptureQueueRootAsync();
-            var point = marker.TransformToVisual(Root).TransformPoint(new Point(0, 60));
-            int y = (int)Math.Round(point.Y * capture.Height / Root.ActualHeight);
-            if (y < 0 || y >= capture.Height) return null;
-            for (int x = 0; x < capture.Width; x++)
+            var point = marker.TransformToVisual(Root).TransformPoint(new Point(16, 60));
+            int fixedX = (int)Math.Round(point.X * capture.Width / Root.ActualWidth);
+            int fixedY = (int)Math.Round(point.Y * capture.Height / Root.ActualHeight);
+            if (fixedX < 0 || fixedX >= capture.Width || fixedY < 0 || fixedY >= capture.Height) return null;
+            for (int position = 0; position < (horizontal ? capture.Width : capture.Height); position++)
             {
+                int x = horizontal ? position : fixedX, y = horizontal ? fixedY : position;
                 int offset = (y * capture.Width + x) * 4;
                 int channel = (int)marker.Tag;
                 int lead = capture.Pixels[offset + channel];
                 int other = Enumerable.Range(0, 3).Where(value => value != channel).Max(value => (int)capture.Pixels[offset + value]);
-                if (lead > 70 && lead - other > 35) return x * Root.ActualWidth / capture.Width;
+                if (lead > 70 && lead - other > 35) return horizontal
+                    ? x * Root.ActualWidth / capture.Width : y * Root.ActualHeight / capture.Height;
             }
             return null;
         }
-        async Task Probe(string target, string label, NavigationMode mode, int direction, Func<bool> navigate)
+        async Task Probe(string target, string label, NavigationMode mode, SlideNavigationTransitionEffect? expectedEffect,
+            Func<bool> navigate, bool captureMotion = false)
         {
             NavigationEventArgs? navigation = null;
-            void CaptureNavigation(object sender, NavigationEventArgs args) => navigation = args;
+            SlideNavigationTransitionEffect? recordedEffect = null;
+            void CaptureNavigation(object sender, NavigationEventArgs args)
+            {
+                navigation = args;
+                // The shared object's Effect changes on later history traversals.
+                // Copy the value during this event, never retain it as edge state.
+                recordedEffect = (args.NavigationTransitionInfo as SlideNavigationTransitionInfo)?.Effect;
+            }
             int backCount = ContentFrame.BackStack.Count, forwardCount = ContentFrame.ForwardStack.Count;
             ContentFrame.Navigated += CaptureNavigation;
             try { Check(navigate(), label + ": navigation was rejected."); }
@@ -180,21 +199,40 @@ public sealed partial class MainWindow
                 NavigationMode.Forward => ContentFrame.BackStack.Count == backCount + 1 && ContentFrame.ForwardStack.Count == forwardCount - 1,
                 _ => false
             }, label + ": native history was duplicated or rewritten.");
-            Check(navigation?.NavigationTransitionInfo is SlideNavigationTransitionInfo { Effect: SlideNavigationTransitionEffect.FromRight },
-                label + ": native route did not record the unified Slide effect.");
-            if (mode == NavigationMode.Back)
-                Check(ContentFrame.ForwardStack.Last().NavigationTransitionInfo is SlideNavigationTransitionInfo { Effect: SlideNavigationTransitionEffect.FromRight },
-                    label + ": Back did not establish the Slide effect for the native forward route.");
+            if (expectedEffect is { } expected)
+            {
+                Check(shellSlideTransition.Effect == expected, label + ": selected the wrong axis for this history edge.");
+                if (mode == NavigationMode.Back)
+                    Check(ReferenceEquals(ContentFrame.ForwardStack.Last().NavigationTransitionInfo, shellSlideTransition),
+                        label + ": Back did not install the shared native Forward transition.");
+                else
+                    Check(ReferenceEquals(navigation?.NavigationTransitionInfo, shellSlideTransition) && recordedEffect == expected,
+                        label + ": the native route did not receive the shared transition with the expected axis.");
+            }
+            else Check(navigation?.NavigationTransitionInfo is SuppressNavigationTransitionInfo,
+                label + ": Create's sidebar-only suppression was lost.");
+            routeSamples.Add(new { Label = label, Target = target, Mode = mode.ToString(),
+                ExpectedEffect = expectedEffect?.ToString() ?? "Suppress", RecordedEffect = recordedEffect?.ToString(),
+                RecordedTransition = navigation?.NavigationTransitionInfo?.GetType().Name });
+            if (!captureMotion)
+            {
+                await Settle();
+                Check(Current() == target, label + ": wrong target page.");
+                return;
+            }
+            bool horizontal = expectedEffect == SlideNavigationTransitionEffect.FromRight;
+            int direction = mode == NavigationMode.Back ? -1 : 1;
             var positions = new List<double>();
             var transforms = new List<double>();
             for (int i = 0; i < 5; i++)
             {
-                transforms.Add(markers[target].TransformToVisual(Root).TransformPoint(default).X);
-                if (await MarkerLeft(markers[target]) is { } x) positions.Add(x);
+                var transform = markers[target].TransformToVisual(Root).TransformPoint(default);
+                transforms.Add(horizontal ? transform.X : transform.Y);
+                if (await MarkerPosition(markers[target], horizontal) is { } position) positions.Add(position);
                 await Task.Delay(16);
             }
             await Settle();
-            double final = await MarkerLeft(markers[target]) ?? throw new InvalidOperationException("Settled slide marker is missing.");
+            double final = await MarkerPosition(markers[target], horizontal) ?? throw new InvalidOperationException("Settled slide marker is missing.");
             Check(Current() == target, label + ": wrong target page.");
             bool intermediateFrame = positions.Any(x => Math.Abs(x - final) > 2);
             if (intermediateFrame)
@@ -203,22 +241,49 @@ public sealed partial class MainWindow
                 Check(positions.Any(x => direction * (x - final) > 2)
                     && positions.All(x => direction * (x - final) >= -2), label + ": observed incoming motion used the wrong side.");
             }
-            motionSamples.Add(new { Label = label, Direction = direction, IntermediateFrame = intermediateFrame,
+            motionSamples.Add(new { Label = label, Axis = horizontal ? "Horizontal" : "Vertical", Direction = direction, IntermediateFrame = intermediateFrame,
                 RecordedTransition = navigation?.NavigationTransitionInfo?.GetType().Name,
                 Positions = positions, Transforms = transforms, Final = final });
         }
         try
         {
-            NavigateShell(new("__slide-a", this)); await Settle();
-            await Probe("__slide-b", "new", NavigationMode.New, 1, () => NavigateShell(new("__slide-b", this)));
-            await Probe("__slide-a", "back", NavigationMode.Back, -1, GoShellBack);
-            await Probe("__slide-b", "forward", NavigationMode.Forward, 1, GoShellForward);
-            NavigateShell(new("创作", this), fromSidebar: true); await Settle();
-            NavigateShell(new("__slide-c", this), fromSidebar: true); await Settle();
-            GoShellBack(); await Settle(); // Create
-            await Probe("__slide-b", "back-across-create", NavigationMode.Back, -1, GoShellBack);
-            GoShellForward(); await Settle(); // Create again
-            await Probe("__slide-c", "consecutive-forward-across-create", NavigationMode.Forward, 1, GoShellForward);
+            const SlideNavigationTransitionEffect vertical = SlideNavigationTransitionEffect.FromBottom;
+            const SlideNavigationTransitionEffect horizontal = SlideNavigationTransitionEffect.FromRight;
+            NavigateShell(RequestFor("__slide-a")); await Settle();
+            await Probe("__slide-b", "main-new", NavigationMode.New, vertical, () => NavigateShell(RequestFor("__slide-b")), true);
+            await Probe("__slide-c", "detail-new", NavigationMode.New, horizontal, () => NavigateShell(RequestFor("__slide-c")), true);
+            await Probe("__slide-a", "detail-to-sidebar", NavigationMode.New, vertical, () => NavigateShell(RequestFor("__slide-a"), fromSidebar: true));
+            await Probe("__slide-c", "back-sidebar-to-detail", NavigationMode.Back, vertical, GoShellBack, true);
+            await Probe("__slide-b", "back-detail-to-main", NavigationMode.Back, horizontal, GoShellBack);
+            await Probe("__slide-c", "forward-detail", NavigationMode.Forward, horizontal, GoShellForward, true);
+            await Probe("__slide-a", "forward-main", NavigationMode.Forward, vertical, GoShellForward, true);
+
+            // Revisit the same song key twice with a main page between visits.
+            NavigateShell(RequestFor("__slide-c")); await Settle();
+            NavigateShell(RequestFor("__slide-b"), fromSidebar: true); await Settle();
+            NavigateShell(RequestFor("__slide-c")); await Settle();
+            NavigateShell(RequestFor("__slide-d")); await Settle();
+            NavigateShell(RequestFor("设置"), fromSidebar: true); await Settle();
+            foreach (var (target, effect) in new[] { ("__slide-d", vertical), ("__slide-c", horizontal),
+                ("__slide-b", horizontal), ("__slide-c", vertical), ("__slide-a", horizontal) })
+                await Probe(target, "mixed-back-" + routeSamples.Count, NavigationMode.Back, effect, GoShellBack);
+            foreach (var (target, effect) in new[] { ("__slide-c", horizontal), ("__slide-b", vertical),
+                ("__slide-c", horizontal), ("__slide-d", horizontal), ("设置", vertical) })
+                await Probe(target, "mixed-forward-" + routeSamples.Count, NavigationMode.Forward, effect, GoShellForward);
+
+            NavigateShell(RequestFor("__slide-c")); await Settle();
+            await Probe("搜索", "detail-to-search", NavigationMode.New, vertical, () => NavigateShell(RequestFor("搜索")));
+            await Probe("__slide-c", "back-search-to-detail", NavigationMode.Back, vertical, GoShellBack);
+            int historyCount = ContentFrame.BackStack.Count;
+            Check(!NavigateShell(RequestFor("__slide-c")) && ContentFrame.BackStack.Count == historyCount,
+                "Reselecting a cached detail created another history entry.");
+            await Probe("创作", "sidebar-create", NavigationMode.New, null, () => NavigateShell(RequestFor("创作"), fromSidebar: true));
+            Check(!ContentFrame.CanGoForward, "A new sidebar route retained stale Forward history.");
+            await Probe("__slide-d", "create-to-detail", NavigationMode.New, horizontal, () => NavigateShell(RequestFor("__slide-d")));
+            await Probe("创作", "back-detail-to-create", NavigationMode.Back, horizontal, GoShellBack);
+            await Probe("__slide-c", "back-create-to-detail", NavigationMode.Back, vertical, GoShellBack);
+            await Probe("创作", "forward-create", NavigationMode.Forward, vertical, GoShellForward);
+            await Probe("__slide-d", "forward-detail-across-create", NavigationMode.Forward, horizontal, GoShellForward);
         }
         finally
         {
@@ -231,7 +296,7 @@ public sealed partial class MainWindow
         }
         return new { CheckCount = checks, RootCaptures = captures, ObservedDirectionSamples = observedDirections,
             DirectionCaptureStatus = observedDirections == 5 ? "Observed" : "Inconclusive: some or all captures contain only the settled endpoint.",
-            AnimationsEnabled = systemUi.AnimationsEnabled, MotionSamples = motionSamples,
-            Limitations = "Synthetic isolated library and native Hyperlink Invoke / Frame history. Native transition selection and history integrity are checked; endpoint-only captures do not prove motion direction. Physical keyboard/pointer behavior, actual horizontal animation and real-library visual acceptance remain manual." };
+            AnimationsEnabled = systemUi.AnimationsEnabled, RouteSamples = routeSamples, MotionSamples = motionSamples,
+            Limitations = "Synthetic isolated library and native Hyperlink Invoke / Frame history. Native transition axes and mixed history integrity are checked; endpoint-only captures do not prove motion direction. Physical keyboard/pointer behavior, actual horizontal/vertical animation and real-library visual acceptance remain manual." };
     }
 }

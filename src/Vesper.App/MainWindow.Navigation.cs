@@ -4,12 +4,21 @@ namespace Vesper.App;
 
 public sealed partial class MainWindow
 {
+    private readonly SlideNavigationTransitionInfo shellSlideTransition = ShellSlideTransition();
+
     private static SlideNavigationTransitionInfo ShellSlideTransition() => new()
     {
-        // WinUI reverses this effect for a Back navigation: new/forward pages
-        // enter from the right, while the Back destination enters from the left.
-        Effect = SlideNavigationTransitionEffect.FromRight
+        Effect = SlideNavigationTransitionEffect.FromBottom
     };
+
+    private SlideNavigationTransitionInfo SelectShellTransition(ShellNavigationRequest? incomingRequest)
+    {
+        // History entries share this mutable transition, so their current Effect
+        // is not a record of an old edge. The immutable route describes its axis.
+        shellSlideTransition.Effect = incomingRequest is { SongId: not null } or { EntityId: not null }
+            ? SlideNavigationTransitionEffect.FromRight : SlideNavigationTransitionEffect.FromBottom;
+        return shellSlideTransition;
+    }
 
     private bool NavigateShell(ShellNavigationRequest request, bool fromSidebar = false)
     {
@@ -19,26 +28,28 @@ public sealed partial class MainWindow
         // Keep Create's established sidebar-only exception. Its independent
         // sidebar width animation is untouched by this page-navigation policy.
         bool suppress = fromSidebar && (current == "创作" || request.Key == "创作");
-        NavigationTransitionInfo transition = suppress ? new SuppressNavigationTransitionInfo() : ShellSlideTransition();
+        NavigationTransitionInfo transition = suppress ? new SuppressNavigationTransitionInfo() : SelectShellTransition(request);
         return ContentFrame.Navigate(typeof(ShellPage), request, transition);
     }
 
     private bool GoShellBack()
     {
         if (closed || !ContentFrame.CanGoBack) return false;
-        // Always override Back, including Create history, so a remembered
-        // Entrance/Suppress transition cannot choose this traversal's effect.
-        ContentFrame.GoBack(ShellSlideTransition());
+        // Undo the edge that brought in the page being left. WinUI reverses the
+        // selected effect for Back: details leave horizontally, root pages vertically.
+        // Always provide the shared instance, including Create history.
+        ContentFrame.GoBack(SelectShellTransition((ContentFrame.Content as ShellPage)?.Request));
         return true;
     }
 
     private bool GoShellForward()
     {
         if (closed || !ContentFrame.CanGoForward) return false;
-        // WinUI exposes only parameterless GoForward and reuses its last override.
-        // A forward route exists only after GoShellBack, which always sets the
-        // same FromRight effect. New navigation clears that route, including a
-        // sidebar Create navigation. Leave native history entries unchanged.
+        // GoForward reuses the object installed by GoShellBack. Change that same
+        // object's Effect before WinUI builds the next storyboard; this also works
+        // across consecutive Forward traversals with different axes. A sidebar
+        // Create navigation clears Forward, and the next Back installs this object again.
+        SelectShellTransition(ContentFrame.ForwardStack.Last().Parameter as ShellNavigationRequest);
         ContentFrame.GoForward();
         return true;
     }
