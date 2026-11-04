@@ -1,7 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Animation;
 using Vesper.Core;
 
 namespace Vesper.App;
@@ -18,12 +17,15 @@ public sealed partial class MainWindow
 
     private void InitializeSearchPresentation()
     {
+        InitializeEntityDetailsPresentation();
         GlobalSearchBox.TextChanged += OnGlobalSearchTextChanged;
         GlobalSearchBox.Loaded += (_, _) => AttachSearchInput();
         viewModel.SearchIndexChanged += OnSearchIndexChanged;
         ContentFrame.Navigating += (_, _) =>
         {
             if ((ContentFrame.Content as ShellPage)?.PageKey == "搜索") searchResults?.CapturePosition();
+            string? key = (ContentFrame.Content as ShellPage)?.PageKey;
+            if (key is not null && pageContent.GetValueOrDefault(key) is EntityDetailsView entity) entity.CapturePosition();
         };
     }
 
@@ -139,7 +141,7 @@ public sealed partial class MainWindow
     {
         if ((ContentFrame.Content as ShellPage)?.PageKey == "搜索") return;
         publishingSearch = true;
-        try { ContentFrame.Navigate(typeof(ShellPage), new ShellNavigationRequest("搜索", this), new EntranceNavigationTransitionInfo()); }
+        try { NavigateShell(new ShellNavigationRequest("搜索", this)); }
         finally { publishingSearch = false; }
     }
 
@@ -164,6 +166,7 @@ public sealed partial class MainWindow
     {
         if (closed) return;
         RequestLibraryActivityStatus();
+        if (!viewModel.IsSearchIndexBuilding) RequestEntityRefresh();
         if (composingSearch || (ContentFrame.Content as ShellPage)?.PageKey != "搜索" || string.IsNullOrWhiteSpace(searchText)) return;
         if (SearchResults.IsInteracting) { deferredSearchRefresh = true; return; }
         // Building notifications do not cancel a usable old snapshot query. A new publication does.
@@ -191,7 +194,7 @@ public sealed partial class MainWindow
     {
         if (viewModel.FindSong(songId) is null) return;
         SearchResults.CapturePosition();
-        ContentFrame.Navigate(typeof(ShellPage), new ShellNavigationRequest("歌曲详情:" + songId, this, songId), new EntranceNavigationTransitionInfo());
+        NavigateShell(new ShellNavigationRequest("歌曲详情:" + songId, this, songId));
     }
     internal async Task QueueSearchVersionAsync(VersionHit version)
     {
@@ -210,6 +213,7 @@ public sealed partial class MainWindow
 
     private void CloseSearchPresentation()
     {
+        entityRefreshTimer.Stop();
         searchRequests.Dispose(); viewModel.SearchIndexChanged -= OnSearchIndexChanged;
         if (searchTextBox is null) return;
         searchTextBox.TextCompositionStarted -= OnSearchCompositionStarted;

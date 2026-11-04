@@ -70,6 +70,7 @@ public sealed partial class SearchResultsView : UserControl
         Query = query; response = null; rows.Clear(); nextSongs = null;
         Songs.ItemsSource = null;
         EntityCards.Visibility = ArtistCard.Visibility = AlbumCard.Visibility = SongHeading.Visibility = MoreSongs.Visibility = Visibility.Collapsed;
+        ArtistOpenButton.Tag = AlbumOpenButton.Tag = null;
         anchor = null; savedOrder = []; restorePending = false;
         ShowStatus(""); versionsFlyout?.Hide();
     }
@@ -88,6 +89,9 @@ public sealed partial class SearchResultsView : UserControl
         AlbumCard.Visibility = album is null ? Visibility.Collapsed : Visibility.Visible;
         ArtistName.Text = artist?.Name ?? ""; AlbumName.Text = album?.Name ?? "";
         AlbumArtist.Text = album?.Artist ?? "";
+        ArtistOpenButton.Tag = artist?.Id; AlbumOpenButton.Tag = album?.Id;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(ArtistOpenButton, "查看艺人 " + artist?.Name);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(AlbumOpenButton, "查看专辑 " + album?.Name);
         EntityCards.Visibility = artist is not null || album is not null ? Visibility.Visible : Visibility.Collapsed;
         Songs.ItemsSource = rows.ToArray();
         SongHeading.Visibility = rows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -109,6 +113,11 @@ public sealed partial class SearchResultsView : UserControl
         MoreSongs.Visibility = page.HasMore ? Visibility.Visible : Visibility.Collapsed;
         _ = RestorePositionAsync();
     }
+
+    private void OnArtistClick(object sender, RoutedEventArgs e)
+    { if (ArtistOpenButton.Tag is string id) { CapturePosition(); host.OpenArtist(id); } }
+    private void OnAlbumClick(object sender, RoutedEventArgs e)
+    { if (AlbumOpenButton.Tag is string id) { CapturePosition(); host.OpenAlbum(id); } }
 
     public void CapturePosition()
     {

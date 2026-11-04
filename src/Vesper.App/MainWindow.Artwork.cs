@@ -80,12 +80,38 @@ public sealed partial class MainWindow
     }
     private async Task<byte[]> DownloadCoverAsync(Uri url)
     {
+        string cacheDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Vesper", "Artwork");
+        string key = System.Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(url.AbsoluteUri)));
+        string cachePath = Path.Combine(cacheDirectory, key + ".image");
+        try
+        {
+            if (File.Exists(cachePath) && new FileInfo(cachePath).Length is > 0 and <= 8388608)
+                return await File.ReadAllBytesAsync(cachePath, metadataCancellation.Token);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(metadataCancellation.Token);
         timeout.CancelAfter(TimeSpan.FromSeconds(15));
         using var response = await lookupHttp.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
         response.EnsureSuccessStatusCode();
         using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
-        return await ReadCoverBytesAsync(stream, timeout.Token);
+        byte[] bytes = await ReadCoverBytesAsync(stream, timeout.Token);
+        string temporary = cachePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            Directory.CreateDirectory(cacheDirectory);
+            await File.WriteAllBytesAsync(temporary, bytes, timeout.Token);
+            File.Move(temporary, cachePath, overwrite: true);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        finally
+        {
+            try { if (File.Exists(temporary)) File.Delete(temporary); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+        return bytes;
     }
     private static async Task<byte[]> ReadCoverBytesAsync(Stream stream, CancellationToken token)
     {

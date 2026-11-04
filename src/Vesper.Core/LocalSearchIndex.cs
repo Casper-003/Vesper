@@ -58,7 +58,7 @@ public sealed class LocalSearchIndex
             string albumArtist = first.AlbumArtist.Length > 0 ? first.AlbumArtist : first.Artist;
             // Without trusted release identity, stay conservative; never merge two artists' same-named releases.
             string albumId = Identity(first.AlbumId, $"album:{LocalSearchText.Fold(LocalSearchText.Normalize(first.Album))}:{LocalSearchText.Fold(LocalSearchText.Normalize(albumArtist))}");
-            if (albumArtist.Length == 0) albumId += ":" + first.SongId;
+            if (albumArtist.Length == 0 && string.IsNullOrWhiteSpace(first.AlbumId)) albumId += ":" + first.SongId;
             versions.Add(new(versionDocs.Key.Version, first.SongId, versionDocs.Key.Group, first.Title, first.Artist,
                 first.VersionName, ordered.Min(document => document.AddedAt), ordered.Any(document => document.IsOriginalMv),
                 Array.AsReadOnly(resources), recordFields.AsReadOnly(), Array.AsReadOnly(credits), first.Album, albumId, albumArtist));

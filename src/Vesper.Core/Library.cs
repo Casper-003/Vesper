@@ -17,6 +17,7 @@ public sealed class LibraryState
     public HashSet<string> Favorites { get; set; } = [];
     public Dictionary<string, DateTimeOffset> FavoriteAddedAt { get; set; } = [];
     public Dictionary<string, SongDetails> Details { get; set; } = [];
+    public LibraryCatalog Catalog { get; set; } = new();
     public List<QueueEntry> PendingQueue { get; set; } = [];
     public QueueEntry? CurrentQueueSong { get; set; }
     public Dictionary<string, FileScanCache> ScanCache { get; set; } = new(StringComparer.OrdinalIgnoreCase);
@@ -35,11 +36,13 @@ public sealed class LibraryStore(string path)
 
     public async Task SaveAsync(LibraryState state)
     {
+        state.Catalog.Reconcile(state);
         var snapshot = new LibraryState
         {
             Directories = [.. state.Directories], Songs = [.. state.Songs], Favorites = [.. state.Favorites],
             FavoriteAddedAt = new(state.FavoriteAddedAt),
             Details = new(state.Details),
+            Catalog = state.Catalog.Snapshot(),
             PendingQueue = [.. state.PendingQueue], CurrentQueueSong = state.CurrentQueueSong,
             ScanCache = new(state.ScanCache, StringComparer.OrdinalIgnoreCase)
         };

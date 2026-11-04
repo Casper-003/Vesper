@@ -1,6 +1,5 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Storage;
 using Windows.Storage.FileProperties;
@@ -32,8 +31,7 @@ public sealed partial class MainWindow
         if (e.ClickedItem is not LibrarySongItem song) return;
         string key = "歌曲详情:" + song.Song.Id;
         if ((ContentFrame.Content as ShellPage)?.PageKey == key) return;
-        ContentFrame.Navigate(typeof(ShellPage), new ShellNavigationRequest(key, this, song.Song.Id),
-            new EntranceNavigationTransitionInfo());
+        NavigateShell(new ShellNavigationRequest(key, this, song.Song.Id));
     }
 
     internal async Task LoadDetailsAsync(LibrarySongItem song)

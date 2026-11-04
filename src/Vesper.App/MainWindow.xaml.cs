@@ -4,7 +4,6 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Navigation;
 using Windows.Graphics;
 using Windows.UI.ViewManagement;
@@ -32,7 +31,8 @@ public sealed partial class MainWindow : Window
         ShellPreferences preferences = new();
         try
         {
-            if (File.Exists(preferencesPath))
+            if (Environment.GetEnvironmentVariable("VESPER_NAVIGATION_CHECK_PATH") is { Length: > 0 }) canSave = false;
+            else if (File.Exists(preferencesPath))
                 preferences = JsonSerializer.Deserialize<ShellPreferences>(File.ReadAllText(preferencesPath)) ?? new();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
@@ -71,7 +71,7 @@ public sealed partial class MainWindow : Window
         systemUi.ColorValuesChanged += OnSystemColorsChanged;
         Closed += (_, _) => { closed = true; responsivenessTrace?.Dispose(); systemUi.ColorValuesChanged -= OnSystemColorsChanged; CloseSearchPresentation(); CloseQueuePresentation(); CloseOverviewScrollbars(); CloseLibraryPresentation(); };
         Activated += (_, _) => ApplyTheme();
-        ContentFrame.Navigate(typeof(ShellPage), new ShellNavigationRequest("首页", this), new EntranceNavigationTransitionInfo());
+        NavigateShell(new ShellNavigationRequest("首页", this));
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -79,6 +79,11 @@ public sealed partial class MainWindow : Window
         if (Navigation.SettingsItem is NavigationViewItem settingsItem) settingsItem.Content = "设置";
         ApplyTheme(); UpdateTitleLayout();
         if (!canSave) PreferenceNotice.IsOpen = true;
+        if (Environment.GetEnvironmentVariable("VESPER_NAVIGATION_CHECK_PATH") is { Length: > 0 } navigationCheckPath)
+        {
+            if (!libraryInitialized) { libraryInitialized = true; await RunOverviewNavigationChecksAsync(navigationCheckPath); }
+            return;
+        }
         if (Environment.GetEnvironmentVariable("VESPER_SEARCH_CHECK_PATH") is { Length: > 0 } searchCheckPath)
         {
             if (!libraryInitialized) { libraryInitialized = true; await RunSearchRuntimeChecksAsync(searchCheckPath); }
@@ -98,6 +103,7 @@ public sealed partial class MainWindow : Window
         {
             libraryInitialized = true;
             await viewModel.InitializeAsync();
+            if (!closed) StartLibraryEnrichment();
             if (!closed && Environment.GetEnvironmentVariable("VESPER_PREVIEW_PAGE") is "曲库" or "收藏" &&
                 Navigation.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(item =>
                     (string)item.Tag == Environment.GetEnvironmentVariable("VESPER_PREVIEW_PAGE")) is { } previewItem)
@@ -156,19 +162,14 @@ public sealed partial class MainWindow : Window
         if (!ready || changingSelection) return;
         string? page = args.IsSettingsSelected ? "设置" : (args.SelectedItem as NavigationViewItem)?.Tag as string;
         if (page is null || (ContentFrame.Content as ShellPage)?.PageKey == page) return;
-        bool createTransition = page == "创作" || (ContentFrame.Content as ShellPage)?.PageKey == "创作";
-        // Create already animates the sidebar width. Avoid layering a page fade
-        // and slide over that transition, which exposed the light card background.
-        NavigationTransitionInfo transition = createTransition
-            ? new SuppressNavigationTransitionInfo() : new EntranceNavigationTransitionInfo();
-        ContentFrame.Navigate(typeof(ShellPage), new ShellNavigationRequest(page, this), transition);
+        NavigateShell(new ShellNavigationRequest(page, this), fromSidebar: true);
     }
 
     private void OnBack(object sender, RoutedEventArgs e)
-    { if (ContentFrame.CanGoBack) ContentFrame.GoBack(new SlideNavigationTransitionInfo { Effect = SlideNavigationTransitionEffect.FromLeft }); }
+    { GoShellBack(); }
 
     private void OnForward(object sender, RoutedEventArgs e)
-    { if (ContentFrame.CanGoForward) ContentFrame.GoForward(); }
+    { GoShellForward(); }
 
     private void OnFrameNavigated(object sender, NavigationEventArgs e)
     {
@@ -185,28 +186,30 @@ public sealed partial class MainWindow : Window
         }
         finally { changingSelection = false; }
         PageTitle.Text = request.SongId is not null ? "歌曲详情" : page;
-        bool overview = request.SongId is null && page is ("首页" or "曲库" or "收藏" or "创作");
+        bool overview = request.EntityId is not null || request.SongId is null && page is ("首页" or "曲库" or "收藏" or "创作");
         PageHeading.Visibility = overview ? Visibility.Collapsed : Visibility.Visible;
         PageArea.Padding = overview ? new Thickness(0) : new Thickness(28, 24, 28, 24);
         LibraryActions.Visibility = page == "曲库" ? Visibility.Visible : Visibility.Collapsed;
-        SongFeedbackPanel.Visibility = page is "曲库" or "收藏" or "搜索" || request.SongId is not null ? Visibility.Visible : Visibility.Collapsed;
+        SongFeedbackPanel.Visibility = page is "曲库" or "收藏" or "搜索" || request.SongId is not null || request.EntityId is not null ? Visibility.Visible : Visibility.Collapsed;
         BackButton.IsEnabled = ContentFrame.CanGoBack;
         ForwardButton.IsEnabled = ContentFrame.CanGoForward;
         OnSearchPageNavigated(page);
         DispatcherQueue.TryEnqueue(UpdateTitleLayout);
     }
 
-    internal void AttachPageContent(ShellPage page, string key, string? songId)
+    internal void AttachPageContent(ShellPage page, string key, string? songId, string? entityId = null, bool isAlbum = false)
     {
-        PrepareOverviewBackground(key, songId);
         if (!pageContent.TryGetValue(key, out FrameworkElement? content))
         {
             content = songId is not null ? new SongDetailsView(this, songId)
+                : entityId is not null ? CreateEntityDetails(key, entityId, isAlbum)
                 : key switch { "首页" => HomePage, "曲库" => LibraryPage, "收藏" => FavoritesPage, "创作" => CreationPage, "设置" => AppearancePanel, "搜索" => SearchResults, _ => new Grid() };
             PageStorage.Children.Remove(content);
             pageContent[key] = content;
         }
         if (pageOwners.TryGetValue(key, out ShellPage? previous)) previous.Content = null;
+        if (content is EntityDetailsView entity && entityId is not null) RefreshEntityDetails(entity, entityId, isAlbum);
+        PrepareOverviewBackground(key, songId);
         content.Visibility = Visibility.Visible;
         if (songId is null) content.DataContext = viewModel;
         page.Content = content;

@@ -112,8 +112,12 @@ try
     await LibraryScanChecks.RunAsync(root, Check);
     await FavoriteChecks.RunAsync(root, Check);
     await SongDetailsChecks.RunAsync(root, Check);
+    await CatalogChecks.RunAsync(root, Check);
+    await LibraryEnrichmentChecks.RunAsync(Check);
+    await EnrichmentModelChecks.RunAsync(root, Check);
     await AutomaticLookupChecks.RunAsync(root, Check);
     await AdditionalSourceChecks.RunAsync(Check);
+    await AdditionalSourceCancellationChecks.RunAsync(Check);
     LyricsDisplayChecks.Run(Check);
     await OverviewChecks.RunAsync(root, Check);
     MatroskaChecks.Run(Check);

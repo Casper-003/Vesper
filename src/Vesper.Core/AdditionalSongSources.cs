@@ -3,10 +3,26 @@ using System.Text.Json;
 
 namespace Vesper.Core;
 
-public sealed partial class AdditionalSongSources(HttpClient http, MusicBrainzClient musicBrainz, LrcLibClient lrcLib)
+public sealed partial class AdditionalSongSources(HttpClient http, MusicBrainzClient musicBrainz, LrcLibClient lrcLib,
+    TimeProvider? timeProvider = null)
 {
     private sealed record Entry(SongMatch Match, long Id, double Duration);
-    private readonly ConcurrentDictionary<string, Task<List<Entry>>> searches = new();
+    private sealed record CachedEntries(List<Entry> Rows, DateTimeOffset ExpiresAt);
+    private sealed class CachedSearch(Func<Task<CachedEntries>> load)
+    {
+        internal readonly Lazy<Task<CachedEntries>> Work = new(() =>
+        {
+            var task = load();
+            // A caller may cancel its wait while the shared request finishes.
+            // Observe a later fault even when there are no remaining waiters.
+            _ = task.ContinueWith(failed => { _ = failed.Exception; }, CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            return task;
+        }, LazyThreadSafetyMode.ExecutionAndPublication);
+    }
+    private readonly ConcurrentDictionary<string, CachedSearch> searches = new();
+    private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
+    private static readonly TimeSpan searchCacheLifetime = TimeSpan.FromMinutes(15);
     private async Task<JsonDocument> GetAsync(string url, CancellationToken token)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
@@ -42,35 +58,75 @@ public sealed partial class AdditionalSongSources(HttpClient http, MusicBrainzCl
     }
     private async Task<List<Entry>> Entries(string title, CancellationToken token)
     {
-        var task = searches.GetOrAdd(title, _ => SearchNetease(title, token));
-        try { return await task; }
-        catch { searches.TryRemove(title, out _); throw; }
+        while (true)
+        {
+            token.ThrowIfCancellationRequested();
+            var search = searches.GetOrAdd(title, CreateSearch);
+            // Each waiter owns only its wait. The shared request has GetAsync's
+            // bounded timeout and is not cancelled by an unrelated caller.
+            var cached = await search.Work.Value.WaitAsync(token);
+            token.ThrowIfCancellationRequested();
+            if (clock.GetUtcNow() < cached.ExpiresAt) return cached.Rows;
+            RemoveSearch(title, search);
+        }
     }
-    private static async Task<IReadOnlyList<T>> Combine<T>(params Func<Task<IReadOnlyList<T>>>[] sources)
+
+    private CachedSearch CreateSearch(string title)
     {
+        CachedSearch? search = null;
+        search = new(async () =>
+        {
+            try
+            {
+                var rows = await SearchNetease(title, CancellationToken.None);
+                return new CachedEntries(rows, clock.GetUtcNow() + searchCacheLifetime);
+            }
+            catch
+            {
+                // Evict faults even if every waiter has already cancelled, and
+                // never let an old failure remove a newer retry's cache entry.
+                RemoveSearch(title, search!);
+                throw;
+            }
+        });
+        return search;
+    }
+
+    private void RemoveSearch(string title, CachedSearch search) =>
+        ((ICollection<KeyValuePair<string, CachedSearch>>)searches).Remove(new(title, search));
+
+    private static async Task<IReadOnlyList<T>> Combine<T>(CancellationToken token, params Func<Task<IReadOnlyList<T>>>[] sources)
+    {
+        token.ThrowIfCancellationRequested();
         var outcomes = await Task.WhenAll(sources.Select(async source =>
         {
             try { return (Rows: await source(), Error: (Exception?)null); }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
             catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidDataException or OperationCanceledException
                 or InvalidOperationException or KeyNotFoundException or FormatException)
             { return (Rows: (IReadOnlyList<T>)Array.Empty<T>(), Error: ex); }
-        }));
+        })).WaitAsync(token);
+        token.ThrowIfCancellationRequested();
         var rows = outcomes.SelectMany(result => result.Rows).ToArray();
         if (rows.Length == 0 && outcomes.Any(result => result.Error is not null)) throw new HttpRequestException("检索来源暂不可用。");
         return rows;
     }
-    public Task<IReadOnlyList<SongMatch>> SearchMetadata(string title, CancellationToken token) => Combine<SongMatch>(
+    public Task<IReadOnlyList<SongMatch>> SearchMetadata(string title, CancellationToken token) => Combine<SongMatch>(token,
         () => musicBrainz.SearchAsync(title, "", token), async () => (await Entries(title, token)).Select(entry => entry.Match).ToList(),
         () => SearchDeezer(title, token));
-    public Task<SongMetadata> GetMetadata(SongMatch match, CancellationToken token) => match.RecordingId.StartsWith("deezer:")
+    public Task<SongMetadata> GetMetadata(SongMatch match, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        return match.RecordingId.StartsWith("deezer:")
         ? Task.FromResult(new SongMetadata(match.Title, match.Artist, match.Album,
             SourceUrl: "https://www.deezer.com/track/" + match.RecordingId[7..], CoverUrl: match.CoverUrl))
         : match.RecordingId.StartsWith("netease:")
         ? Task.FromResult(new SongMetadata(match.Title, match.Artist, match.Album, Year: match.Year,
             SourceUrl: "https://music.163.com/song?id=" + match.RecordingId[8..], CoverUrl: match.CoverUrl))
         : musicBrainz.GetMetadataAsync(match, token);
+    }
     public Task<IReadOnlyList<LyricsCandidate>> SearchLyricsWithArtist(string title, string artist, CancellationToken token) => SearchLyrics(title, token, artist);
-    public Task<IReadOnlyList<LyricsCandidate>> SearchLyrics(string title, CancellationToken token, string artistHint = "") => Combine<LyricsCandidate>(
+    public Task<IReadOnlyList<LyricsCandidate>> SearchLyrics(string title, CancellationToken token, string artistHint = "") => Combine<LyricsCandidate>(token,
         () => lrcLib.SearchAsync(title, token), async () =>
         {
             var entries = await Entries(title, token);

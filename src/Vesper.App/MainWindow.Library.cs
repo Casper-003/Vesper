@@ -70,6 +70,7 @@ public sealed partial class MainWindow
 
     private void CloseLibraryPresentation()
     {
+        CloseLibraryEnrichment();
         libraryFeedbackTimer.Stop();
         activityRefreshTimer.Stop();
         overviewIdleTimer.Stop();
@@ -253,12 +254,26 @@ public sealed partial class MainWindow
             }
             var properties = await ReadWindowsPropertyAsync(file.Properties.RetrievePropertiesAsync(
                 ["System.Title", "System.Music.Artist", "System.Music.AlbumTitle", "System.Media.Publisher",
-                 "System.Media.Year", "System.Music.Lyrics", "System.Media.Duration"]), token).ConfigureAwait(false);
+                 "System.Media.Year", "System.Music.Lyrics", "System.Media.Duration", "System.Music.AlbumArtist",
+                 "System.Music.TrackNumber", "System.Music.PartOfSet"]), token).ConfigureAwait(false);
             string Text(string key) => (properties.TryGetValue(key, out var propertyValue) ? propertyValue : null) switch
             { string value => value.Trim(), string[] values => string.Join(" / ", values), uint year when year > 0 => year.ToString(), _ => "" };
             double duration = properties.TryGetValue("System.Media.Duration", out var durationValue) && durationValue is ulong ticks ? ticks / 10000000d : 0;
+            int? Number(string key)
+            {
+                if (!properties.TryGetValue(key, out var value) || value is null) return null;
+                string first = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture)?.Split('/')[0].Trim() ?? "";
+                return int.TryParse(first, out int number) && number > 0 ? number : null;
+            }
+            var credits = properties.TryGetValue("System.Music.Artist", out var artists) && artists is string[] names
+                ? names.Where(name => !string.IsNullOrWhiteSpace(name)).Select(name => new MusicArtistCredit(name.Trim())).ToArray()
+                : Array.Empty<MusicArtistCredit>();
             return new(path, resolution, new(Text("System.Title"), Text("System.Music.Artist"), Text("System.Music.AlbumTitle"),
-                Text("System.Media.Publisher"), Text("System.Media.Year"), Text("System.Music.Lyrics"), DurationSeconds: duration));
+                Text("System.Media.Publisher"), Text("System.Media.Year"), Text("System.Music.Lyrics"), DurationSeconds: duration)
+            {
+                AlbumArtist = Text("System.Music.AlbumArtist"), DiscNumber = Number("System.Music.PartOfSet"),
+                TrackNumber = Number("System.Music.TrackNumber"), ArtistCredits = credits
+            });
         }
         catch (Exception) when (!token.IsCancellationRequested) { return new(path, resolution, null); }
     }

@@ -81,6 +81,9 @@ internal static class SongDetailsChecks
         check(metadata.Publisher == "测试唱片" && metadata.Year == "2020"
             && metadata.SourceUrl.Contains(recording) && metadata.CoverUrl.Contains(release),
             "选定专辑后读取唱片公司和年份，并保存资料及封面来源");
+        check(metadata.ExternalIds.Any(id => id.Kind == "recording" && id.Value == recording)
+            && !metadata.ExternalIds.Any(id => id.Kind == "release") && metadata.DiscNumber is null && metadata.TrackNumber is null,
+            "MusicBrainz描述性专辑候选不冒作本地文件已确认发行版，也不生成曲序");
         using var biliHttp = new HttpClient(new FixtureHandler(_ => """{"code":0,"data":{"result":[{"bvid":"BV1zx411R7ro","title":"<em class=\"keyword\">歌手</em> - 歌名 &amp; MV","author":"上传者","duration":"3:20"}]}}"""));
         var videos = await new BilibiliVideoClient(biliHttp).SearchAsync("歌名", "歌手");
         check(videos.Single().Title == "歌手 - 歌名 & MV" && videos[0].DurationSeconds == 200,
