@@ -25,6 +25,7 @@ public sealed partial class MainWindow
         OverviewBackdrop.Visibility = overviewBackdropList is null ? Visibility.Collapsed : Visibility.Visible;
         if (overviewBackdropList is { } list)
         {
+            OverviewBackdrop.Background = GetOverviewHeroBrush(list);
             // The existing page still moves in Frame. This separate color layer
             // only fills the gap it uncovers, using the same height and scroll clip.
             OverviewBackdrop.SetBinding(FrameworkElement.HeightProperty, new Binding
@@ -46,6 +47,7 @@ public sealed partial class MainWindow
     private void SyncOverviewBackground(ListView list)
     {
         if (closed || !ReferenceEquals(list, overviewBackdropList)) return;
+        OverviewBackdrop.Background = GetOverviewHeroBrush(list);
         var visual = ElementCompositionPreview.GetElementVisual(OverviewBackdrop);
         var clip = overviewBackdropClip ??= visual.Compositor.CreateInsetClip();
         bool reattached = !ReferenceEquals(visual.Clip, clip);

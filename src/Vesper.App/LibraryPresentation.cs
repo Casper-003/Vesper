@@ -20,6 +20,7 @@ public sealed class LibrarySongItem(Song song) : INotifyPropertyChanged
     private string artist = "未知艺人";
     private SongDetails details = new();
     private object? cover;
+    private object? thumbnail;
     private bool lookupPending;
     private string displayLyrics = "";
     private SongMetadata? effective;
@@ -40,6 +41,8 @@ public sealed class LibrarySongItem(Song song) : INotifyPropertyChanged
     public string Lyrics => displayLyrics;
     public string SourceUrl => Effective.SourceUrl;
     public string CoverUrl => Effective.CoverUrl;
+    internal string ArtworkIdentity => CoverUrl.Length > 0 ? "url\n" + CoverUrl
+        : "local\n" + details.LocalReadKey + "\n" + string.Join('\n', Song.Sources.Select(path => path.ToUpperInvariant()));
     public double DurationSeconds => details.Local?.DurationSeconds ?? 0;
     public string MatchedVideoUrl => details.Video?.Url ?? "";
     public bool HasMatchedVideo => details.Video is not null;
@@ -63,19 +66,64 @@ public sealed class LibrarySongItem(Song song) : INotifyPropertyChanged
         : "";
     public bool HasLookupMessage => LookupMessage.Length > 0;
     public bool HasNoDetails => !LookupPending && !HasArtist && !HasAlbum && !HasPublisher && !HasYear;
-    public object? Cover { get => cover; set { if (ReferenceEquals(cover, value)) return; cover = value; Notify(); Notify(nameof(HasCover)); Notify(nameof(HasNoCover)); } }
+    public object? Cover
+    {
+        get => cover;
+        set
+        {
+            if (ReferenceEquals(cover, value)) return;
+            var previous = ListCover;
+            cover = value;
+            Notify(); Notify(nameof(HasCover)); Notify(nameof(HasNoCover));
+            NotifyListCover(previous);
+        }
+    }
+    // A row thumbnail can be evicted independently of the detail page's full-size cover.
+    public object? Thumbnail
+    {
+        get => thumbnail;
+        set
+        {
+            if (ReferenceEquals(thumbnail, value)) return;
+            var previous = ListCover;
+            thumbnail = value;
+            Notify();
+            NotifyListCover(previous);
+        }
+    }
+    public object? ListCover => thumbnail ?? cover;
+    public bool HasListCover => ListCover is not null;
+    public bool HasNoListCover => !HasListCover;
+    private void NotifyListCover(object? previous)
+    {
+        if (ReferenceEquals(previous, ListCover)) return;
+        Notify(nameof(ListCover));
+        if ((previous is null) != (ListCover is null)) { Notify(nameof(HasListCover)); Notify(nameof(HasNoListCover)); }
+    }
+    private void InvalidateArtwork()
+    {
+        var previous = ListCover;
+        bool hadCover = cover is not null, hadThumbnail = thumbnail is not null;
+        cover = thumbnail = null;
+        CoverColor = 0xFF48545C;
+        if (hadCover) { Notify(nameof(Cover)); Notify(nameof(HasCover)); Notify(nameof(HasNoCover)); }
+        if (hadThumbnail) Notify(nameof(Thumbnail));
+        NotifyListCover(previous);
+        Notify(nameof(ArtworkIdentity));
+    }
     public bool HasCover => Cover is not null;
     public bool HasNoCover => !HasCover;
     public void ApplyDetails(SongDetails value)
     {
         if (details == value) return;
         var old = Effective;
+        string previousArtwork = ArtworkIdentity;
         string oldLyrics = displayLyrics, oldLyricsSource = LyricsSourceUrl, oldMessage = LookupMessage;
         bool oldHasNoDetails = HasNoDetails;
         var oldVideo = details.Video;
-        if (details.Online?.CoverUrl != value.Online?.CoverUrl) { Cover = null; CoverColor = 0xFF48545C; }
         details = value;
         effective = value.Effective(Song.Title);
+        if (previousArtwork != ArtworkIdentity) InvalidateArtwork();
         if (old.Lyrics != Effective.Lyrics) displayLyrics = LyricsDisplay.Clean(Effective.Lyrics);
         Changed(old.Title, Title, nameof(Title));
         Changed(old.Artist, ArtistDetail, nameof(ArtistDetail));
@@ -119,11 +167,13 @@ public sealed class LibrarySongItem(Song song) : INotifyPropertyChanged
     public string FavoriteHint => IsFavorite ? "取消收藏" : "收藏";
     public void Update(Song song, bool isFavorite, bool available)
     {
+        string previousArtwork = ArtworkIdentity;
         bool titleChanged = Song.Title != song.Title;
         bool availabilityChanged = IsAvailable != available;
         if (!Song.Sources.SequenceEqual(song.Sources, StringComparer.OrdinalIgnoreCase)) { MetadataLoaded = false; MetadataRetryAfter = default; }
         Song = song;
         if (titleChanged) effective = null;
+        if (previousArtwork != ArtworkIdentity) InvalidateArtwork();
         IsAvailable = available;
         IsFavorite = isFavorite;
         if (titleChanged) Notify(nameof(Title));

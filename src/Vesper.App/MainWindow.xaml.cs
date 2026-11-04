@@ -31,7 +31,10 @@ public sealed partial class MainWindow : Window
         ShellPreferences preferences = new();
         try
         {
-            if (Environment.GetEnvironmentVariable("VESPER_NAVIGATION_CHECK_PATH") is { Length: > 0 }) canSave = false;
+            if (Environment.GetEnvironmentVariable("VESPER_NAVIGATION_CHECK_PATH") is { Length: > 0 }
+                || Environment.GetEnvironmentVariable("VESPER_ARTWORK_CHECK_PATH") is { Length: > 0 }
+                || Environment.GetEnvironmentVariable("VESPER_PAGE_CHECK_PATH") is { Length: > 0 }
+                || Environment.GetEnvironmentVariable("VESPER_COLOR_CHECK_PATH") is { Length: > 0 }) canSave = false;
             else if (File.Exists(preferencesPath))
                 preferences = JsonSerializer.Deserialize<ShellPreferences>(File.ReadAllText(preferencesPath)) ?? new();
         }
@@ -72,13 +75,31 @@ public sealed partial class MainWindow : Window
         Closed += (_, _) => { closed = true; responsivenessTrace?.Dispose(); systemUi.ColorValuesChanged -= OnSystemColorsChanged; CloseSearchPresentation(); CloseQueuePresentation(); CloseOverviewScrollbars(); CloseLibraryPresentation(); };
         Activated += (_, _) => ApplyTheme();
         NavigateShell(new ShellNavigationRequest("首页", this));
+        PageLoading.Visibility = Visibility.Visible;
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         if (Navigation.SettingsItem is NavigationViewItem settingsItem) settingsItem.Content = "设置";
         ApplyTheme(); UpdateTitleLayout();
+        if (IsIsolatedUiCheck()) PageLoading.Visibility = Visibility.Collapsed;
         if (!canSave) PreferenceNotice.IsOpen = true;
+        if (Environment.GetEnvironmentVariable("VESPER_COLOR_CHECK_PATH") is { Length: > 0 } colorCheckPath)
+        {
+            if (!libraryInitialized) { libraryInitialized = true; await RunColorChecksAsync(colorCheckPath); }
+            return;
+        }
+        if (Environment.GetEnvironmentVariable("VESPER_PAGE_CHECK_PATH") is { Length: > 0 } pageCheckPath)
+        {
+            PageLoading.Visibility = Visibility.Collapsed;
+            if (!libraryInitialized) { libraryInitialized = true; await RunPagePreparationChecksAsync(pageCheckPath); }
+            return;
+        }
+        if (Environment.GetEnvironmentVariable("VESPER_ARTWORK_CHECK_PATH") is { Length: > 0 } artworkCheckPath)
+        {
+            if (!libraryInitialized) { libraryInitialized = true; await RunArtworkChecksAsync(artworkCheckPath); }
+            return;
+        }
         if (Environment.GetEnvironmentVariable("VESPER_NAVIGATION_CHECK_PATH") is { Length: > 0 } navigationCheckPath)
         {
             if (!libraryInitialized) { libraryInitialized = true; await RunOverviewNavigationChecksAsync(navigationCheckPath); }
@@ -102,7 +123,15 @@ public sealed partial class MainWindow : Window
         if (!libraryInitialized)
         {
             libraryInitialized = true;
-            await viewModel.InitializeAsync();
+            long startupRevision = pagePreparationRevision;
+            SetPagePreparationProgress(0, 0, "正在准备曲库…");
+            PageLoading.Visibility = Visibility.Visible;
+            try { await viewModel.InitializeAsync(); }
+            finally
+            {
+                libraryPrepared.TrySetResult();
+                if (startupRevision == pagePreparationRevision) PageLoading.Visibility = Visibility.Collapsed;
+            }
             if (!closed) StartLibraryEnrichment();
             if (!closed && Environment.GetEnvironmentVariable("VESPER_PREVIEW_PAGE") is "曲库" or "收藏" &&
                 Navigation.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(item =>
@@ -161,7 +190,7 @@ public sealed partial class MainWindow : Window
     {
         if (!ready || changingSelection) return;
         string? page = args.IsSettingsSelected ? "设置" : (args.SelectedItem as NavigationViewItem)?.Tag as string;
-        if (page is null || (ContentFrame.Content as ShellPage)?.PageKey == page) return;
+        if (page is null) return;
         NavigateShell(new ShellNavigationRequest(page, this), fromSidebar: true);
     }
 

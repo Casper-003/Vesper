@@ -9,7 +9,11 @@ public sealed partial class MainWindow
     private void StartLibraryEnrichment()
     {
         if (closed || libraryEnrichment is not null || viewModel.ReadOnly) return;
-        libraryEnrichment = new(viewModel, ReadBackgroundLocalMetadataAsync, LookupBackgroundMetadataAsync, DispatchEnrichmentAsync);
+        _ = AutomaticLookup;
+        artistProfileClient = new(lookupHttp, SongLookup);
+        libraryEnrichment = new(viewModel, ReadBackgroundLocalMetadataAsync, LookupBackgroundMetadataAsync, DispatchEnrichmentAsync,
+            synchronizeAssets: SynchronizeLibraryAssetsAsync, onlineConcurrency: 4,
+            synchronizeVideo: SynchronizeBackgroundVideoAsync);
         libraryEnrichment.StateChanged += OnLibraryEnrichmentStateChanged;
         libraryEnrichment.Start();
     }
@@ -19,7 +23,7 @@ public sealed partial class MainWindow
         if (closed) return Task.FromCanceled(new CancellationToken(true));
         if (DispatcherQueue.HasThreadAccess) return action();
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!DispatcherQueue.TryEnqueue(async () =>
+        if (!DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, async () =>
         {
             try
             {
@@ -72,12 +76,18 @@ public sealed partial class MainWindow
         finally { automaticLookupSlots.Release(); }
     }
 
-    private void OnLibraryEnrichmentStateChanged(object? sender, EventArgs args) => DispatcherQueue.TryEnqueue(() =>
+    private int enrichmentStatusPending;
+    private void OnLibraryEnrichmentStateChanged(object? sender, EventArgs args)
     {
+        if (Interlocked.Exchange(ref enrichmentStatusPending, 1) != 0) return;
+        if (!DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+    {
+        Interlocked.Exchange(ref enrichmentStatusPending, 0);
         if (closed || libraryEnrichment is null) return;
         var state = libraryEnrichment.State;
         viewModel.SetEnrichmentActivity(state.IsBusy, state.Label, state.Tooltip);
-    });
+    })) Interlocked.Exchange(ref enrichmentStatusPending, 0);
+    }
 
     private void CloseLibraryEnrichment()
     {

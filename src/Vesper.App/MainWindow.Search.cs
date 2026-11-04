@@ -45,6 +45,7 @@ public sealed partial class MainWindow
 
     private void OnSearchCompositionStarted(TextBox sender, TextCompositionStartedEventArgs args)
     {
+        if (pagePreparationCancellation is not null) CancelPagePreparation();
         composingSearch = true;
         pendingSearch = searchRequests.BeginEdit();
         scheduledSearch = null;
@@ -62,6 +63,7 @@ public sealed partial class MainWindow
     private void OnGlobalSearchTextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
     {
         if (!ready || closed || restoringSearchText || args.Reason == AutoSuggestionBoxTextChangeReason.ProgrammaticChange) return;
+        if (pagePreparationCancellation is not null) CancelPagePreparation();
         if (composingSearch) { pendingSearch = searchRequests.BeginEdit(); scheduledSearch = null; return; }
         ScheduleSearch(sender.Text);
     }
@@ -167,7 +169,8 @@ public sealed partial class MainWindow
         if (closed) return;
         RequestLibraryActivityStatus();
         if (!viewModel.IsSearchIndexBuilding) RequestEntityRefresh();
-        if (composingSearch || (ContentFrame.Content as ShellPage)?.PageKey != "搜索" || string.IsNullOrWhiteSpace(searchText)) return;
+        if (composingSearch || !pagePreparationTask.IsCompleted || (ContentFrame.Content as ShellPage)?.PageKey != "搜索"
+            || string.IsNullOrWhiteSpace(searchText)) return;
         if (SearchResults.IsInteracting) { deferredSearchRefresh = true; return; }
         // Building notifications do not cancel a usable old snapshot query. A new publication does.
         if (viewModel.SearchIndex is { } index && index.Revision != SearchResults.Revision)

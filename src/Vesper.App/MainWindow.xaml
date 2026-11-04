@@ -7,7 +7,9 @@
       <local:BooleanToVisibilityConverter x:Key="BoolVisibility"/><local:CoverColorConverter x:Key="CoverColor"/>
       <SolidColorBrush x:Key="OverviewEvenBrush" Color="#1A808080"/>
       <SolidColorBrush x:Key="OverviewOddBrush" Color="#05808080"/><SolidColorBrush x:Key="OverviewEvenHoverBrush" Color="#383838"/><SolidColorBrush x:Key="OverviewOddHoverBrush" Color="#303030"/>
-      <SolidColorBrush x:Key="OverviewSystemAccentBrush" Color="{ThemeResource SystemAccentColor}"/>
+      <LinearGradientBrush x:Key="OverviewNeutralBrush" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#303034" Offset="0"/><GradientStop Color="#29292C" Offset="0.58"/><GradientStop Color="#242426" Offset="1"/>
+      </LinearGradientBrush>
       <Style x:Key="ShellCardStyle" TargetType="Border">
         <Setter Property="CornerRadius" Value="8"/>
         <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}"/>
@@ -97,12 +99,12 @@
         </ControlTemplate></Setter.Value></Setter>
       </Style>
       <DataTemplate x:Key="SongRowTemplate" x:DataType="local:LibrarySongItem">
-        <local:SongRowSurface Height="64" Padding="8" ColumnSpacing="14" Opacity="{x:Bind RowOpacity, Mode=OneWay}" Loaded="OnSongRowLoaded" DataContextChanged="OnSongRowContextChanged">
+        <local:SongRowSurface Height="64" Padding="8" ColumnSpacing="14" Opacity="{x:Bind RowOpacity, Mode=OneWay}" Loaded="OnSongRowLoaded" Unloaded="OnSongRowUnloaded" DataContextChanged="OnSongRowContextChanged">
           <Grid.ColumnDefinitions><ColumnDefinition Width="48"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
           <Border Width="48" Height="48" CornerRadius="4" Background="{ThemeResource ControlFillColorSecondaryBrush}">
             <Grid>
-              <FontIcon Glyph="&#xE93C;" FontSize="22" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Visibility="{x:Bind HasNoCover, Mode=OneWay}"/>
-              <Image Source="{Binding Cover}" Stretch="UniformToFill" Visibility="{x:Bind HasCover, Mode=OneWay}"/>
+              <FontIcon Glyph="&#xE93C;" FontSize="22" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Visibility="{Binding HasNoListCover, Converter={StaticResource BoolVisibility}}"/>
+              <Image Source="{Binding ListCover}" Stretch="UniformToFill" Visibility="{Binding HasListCover, Converter={StaticResource BoolVisibility}}"/>
             </Grid>
           </Border>
           <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center">
@@ -196,12 +198,17 @@
           <TextBlock x:Name="PageTitle" Text="首页" Style="{StaticResource TitleTextBlockStyle}" VerticalAlignment="Center"/>
         </Grid>
         <Grid x:Name="OverviewBackdrop" Grid.Row="1" VerticalAlignment="Top" Visibility="Collapsed"
-            IsHitTestVisible="False" Background="{StaticResource OverviewSystemAccentBrush}">
-          <Border Background="#33000000"/>
-        </Grid>
+            IsHitTestVisible="False" Background="{StaticResource OverviewNeutralBrush}"/>
         <Frame x:Name="ContentFrame" Grid.Row="1" Navigated="OnFrameNavigated">
           <Frame.ContentTransitions><TransitionCollection><NavigationThemeTransition/></TransitionCollection></Frame.ContentTransitions>
         </Frame>
+        <Grid x:Name="PageLoading" Grid.Row="1" Canvas.ZIndex="20" Background="{ThemeResource SolidBackgroundFillColorBaseBrush}">
+          <StackPanel MaxWidth="360" Margin="32" HorizontalAlignment="Stretch" VerticalAlignment="Center" Spacing="14">
+            <TextBlock x:Name="PageLoadingLabel" Text="正在准备曲库…" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap"/>
+            <ProgressBar x:Name="PageLoadingBar" IsIndeterminate="True" AutomationProperties.Name="页面准备进度"/>
+            <TextBlock x:Name="PageLoadingCount" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+          </StackPanel>
+        </Grid>
         <Grid x:Name="PageStorage" Grid.Row="1" Visibility="Collapsed">
         <Grid x:Name="HomePage" SizeChanged="OnOverviewSizeChanged">
           <ListView x:Name="HomeOverview" Margin="24,48,24,12" SelectionMode="None" ScrollViewer.IsScrollInertiaEnabled="True" ScrollViewer.IsDeferredScrollingEnabled="False" ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollMode="Enabled" ScrollViewer.VerticalScrollBarVisibility="Hidden" Loaded="OnOverviewLoaded">
@@ -220,7 +227,7 @@
             </ListView.Footer>
           </ListView>
           <Grid x:Name="HomeHeroLayer" Height="260" VerticalAlignment="Top" IsHitTestVisible="False">
-            <Grid Background="{StaticResource OverviewSystemAccentBrush}"><Border Background="#33000000"/></Grid>
+            <Grid Background="{StaticResource OverviewNeutralBrush}"/>
             <Canvas x:Name="HomeTitleMotion" Margin="32,0,0,0"><TextBlock x:Name="HomeTitleBold" Canvas.Left="0" Text="Home" FontSize="96" LineHeight="116" FontWeight="Bold" Foreground="White"/></Canvas>
           </Grid>
           <Grid x:Name="HomeScrollRail" Width="16" HorizontalAlignment="Right" Background="Transparent" Visibility="Collapsed">
@@ -232,7 +239,7 @@
             <ListView.Header><Grid x:Name="CreationHeaderSpace" Height="280"/></ListView.Header>
           </ListView>
           <Grid x:Name="CreationHeroLayer" Height="260" VerticalAlignment="Top" IsHitTestVisible="False">
-            <Grid Background="{StaticResource OverviewSystemAccentBrush}"><Border Background="#33000000"/></Grid>
+            <Grid Background="{StaticResource OverviewNeutralBrush}"/>
             <Canvas x:Name="CreationTitleMotion" Margin="32,0,0,0"><TextBlock x:Name="CreationTitleBold" Canvas.Left="0" Text="Create" FontSize="96" LineHeight="116" FontWeight="Bold" Foreground="White"/></Canvas>
           </Grid>
           <ScrollViewer x:Name="CreationEmptyState" Margin="24,284,24,24" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center">
@@ -254,10 +261,7 @@
               </ListView.Header><ListView.Footer><Grid/></ListView.Footer>
             </ListView>
             <Grid x:Name="LibraryHeroLayer" Height="260" VerticalAlignment="Top" IsHitTestVisible="False">
-              <Grid x:Name="LibraryHeroArtwork" Background="{StaticResource OverviewSystemAccentBrush}">
-
-                <Border Background="#33000000"/>
-              </Grid>
+              <Grid x:Name="LibraryHeroArtwork" Background="{StaticResource OverviewNeutralBrush}"/>
               <Canvas x:Name="LibraryTitleMotion" Margin="32,0,0,0"><TextBlock x:Name="LibraryTitleBold" Canvas.Left="0" Text="Library" FontSize="96" LineHeight="116" FontWeight="Bold" Foreground="White"/></Canvas>
             </Grid>
           <StackPanel x:Name="LibraryActions" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="16,6,16,0" Orientation="Horizontal" Spacing="8" Visibility="Collapsed">
@@ -322,10 +326,7 @@
             </ListView.Header><ListView.Footer><Grid/></ListView.Footer>
           </ListView>
           <Grid x:Name="FavoriteHeroLayer" Height="260" VerticalAlignment="Top" IsHitTestVisible="False">
-            <Grid x:Name="FavoriteHeroArtwork" Background="{StaticResource OverviewSystemAccentBrush}">
-
-              <Border Background="#33000000"/>
-            </Grid>
+            <Grid x:Name="FavoriteHeroArtwork" Background="{StaticResource OverviewNeutralBrush}"/>
             <Canvas x:Name="FavoriteTitleMotion" Margin="32,0,0,0"><TextBlock x:Name="FavoriteTitleBold" Canvas.Left="0" Text="Favourites" FontSize="96" LineHeight="116" FontWeight="Bold" Foreground="White"/></Canvas>
           </Grid>
           <ScrollViewer x:Name="FavoriteEmptyState" Margin="24,284,24,24" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center" Visibility="{Binding HasNoFavorites, Converter={StaticResource BoolVisibility}}">

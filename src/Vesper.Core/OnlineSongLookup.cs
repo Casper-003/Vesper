@@ -32,7 +32,7 @@ public sealed class MusicBrainzClient(HttpClient client)
         static string Quote(string value) => "\"" + value.Trim().Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
         string query = "recording:" + Quote(title);
         if (!string.IsNullOrWhiteSpace(artist)) query += " AND artist:" + Quote(artist);
-        using var json = await GetAsync("recording/?fmt=json&limit=25&query=" + Uri.EscapeDataString(query), token);
+        using var json = await GetAsync("recording/?fmt=json&limit=25&query=" + Uri.EscapeDataString(query), token).ConfigureAwait(false);
         var matches = new List<SongMatch>();
         if (!json.RootElement.TryGetProperty("recordings", out var recordings)) return matches;
         foreach (var recording in recordings.EnumerateArray())
@@ -67,7 +67,7 @@ public sealed class MusicBrainzClient(HttpClient client)
         string publisher = "", date = match.Year;
         if (Guid.TryParse(match.ReleaseId, out _))
         {
-            using var json = await GetAsync($"release/{match.ReleaseId}?fmt=json&inc=labels", token);
+            using var json = await GetAsync($"release/{match.ReleaseId}?fmt=json&inc=labels", token).ConfigureAwait(false);
             var release = json.RootElement;
             if (Text(release, "date") is { Length: > 0 } actualDate) date = actualDate;
             if (release.TryGetProperty("label-info", out var labels))
@@ -86,19 +86,63 @@ public sealed class MusicBrainzClient(HttpClient client)
         };
     }
 
-    private async Task<JsonDocument> GetAsync(string path, CancellationToken token)
+    /// <summary>Resolve creators through the recording's explicit work relationships, never by a similar name.</summary>
+    public async Task<IReadOnlyList<MusicArtistCredit>> GetRecordingCreditsAsync(string recordingId, CancellationToken token = default)
     {
-        await gate.WaitAsync(token);
+        if (!Guid.TryParse(recordingId, out _)) return [];
+        using var recording = await GetAsync($"recording/{recordingId}?fmt=json&inc=artist-credits+work-rels", token).ConfigureAwait(false);
+        if (!string.Equals(Text(recording.RootElement, "id"), recordingId, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("歌曲资料身份不一致。");
+        var credits = new List<MusicArtistCredit>();
+        if (recording.RootElement.TryGetProperty("artist-credit", out var performers) && performers.ValueKind == JsonValueKind.Array)
+            foreach (var performer in performers.EnumerateArray())
+                if (performer.TryGetProperty("artist", out var artist)) AddCredit(artist, "performer", Text(performer, "name"));
+        if (recording.RootElement.TryGetProperty("relations", out var relations) && relations.ValueKind == JsonValueKind.Array)
+        {
+            // Medleys may link to many works. Keep each job small enough to yield the online lane.
+            var works = relations.EnumerateArray().Where(relation => Text(relation, "target-type") == "work"
+                    && Text(relation, "type") == "performance" && relation.TryGetProperty("work", out _))
+                .Select(relation => Text(relation.GetProperty("work"), "id"))
+                .Where(id => Guid.TryParse(id, out _)).Distinct(StringComparer.OrdinalIgnoreCase).Take(8).ToArray();
+            foreach (string workId in works)
+            {
+                using var work = await GetAsync($"work/{workId}?fmt=json&inc=artist-rels", token).ConfigureAwait(false);
+                if (!string.Equals(Text(work.RootElement, "id"), workId, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("作品资料身份不一致。");
+                if (!work.RootElement.TryGetProperty("relations", out var writers) || writers.ValueKind != JsonValueKind.Array) continue;
+                foreach (var writer in writers.EnumerateArray())
+                    if (Text(writer, "type") == "composer" && Text(writer, "target-type") == "artist"
+                        && writer.TryGetProperty("artist", out var composer)) AddCredit(composer, "composer");
+            }
+        }
+        return credits.DistinctBy(CreditKey).ToArray();
+
+        void AddCredit(JsonElement artist, string role, string name = "")
+        {
+            string id = Text(artist, "id");
+            if (name.Length == 0) name = Text(artist, "name");
+            if (name.Length > 0 && Guid.TryParse(id, out _))
+                credits.Add(new(name, role, [new("musicbrainz", "artist", id)]));
+        }
+    }
+
+    private static string CreditKey(MusicArtistCredit credit) => credit.Role + "\n"
+        + (credit.ExternalIds?.FirstOrDefault(id => id.Provider == "musicbrainz" && id.Kind == "artist")?.Value.ToUpperInvariant()
+            ?? credit.Name.ToUpperInvariant());
+
+    internal async Task<JsonDocument> GetAsync(string path, CancellationToken token)
+    {
+        await gate.WaitAsync(token).ConfigureAwait(false);
         try
         {
             TimeSpan delay = nextRequest - DateTimeOffset.UtcNow;
-            if (delay > TimeSpan.Zero) await Task.Delay(delay, token);
+            if (delay > TimeSpan.Zero) await Task.Delay(delay, token).ConfigureAwait(false);
             nextRequest = DateTimeOffset.UtcNow.AddMilliseconds(1100);
             using var request = new HttpRequestMessage(HttpMethod.Get, "https://musicbrainz.org/ws/2/" + path);
             request.Headers.UserAgent.ParseAdd("Vesper/0.1 (+https://github.com/Casper-003/Vesper)");
-            using var response = await client.SendAsync(request, token);
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
-            return JsonDocument.Parse(await response.Content.ReadAsStringAsync(token));
+            return await ArtistProfileClient.ReadJsonAsync(response, token).ConfigureAwait(false);
         }
         finally { gate.Release(); }
     }

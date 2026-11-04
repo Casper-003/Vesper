@@ -28,13 +28,19 @@ public sealed partial class MainViewModel
 
     public IReadOnlyList<LibraryEnrichmentCandidate> CaptureEnrichmentCandidates()
     {
+        (Song Song, SongDetails Details)[] snapshot;
+        Dictionary<string, FileScanCache> scanCache;
         lock (searchIndexGate)
         {
             if (!initialized || disposed || ReadOnly) return [];
-            return Library.Songs.Where(song => availability.GetValueOrDefault(song.Id)).Select(song =>
-                new LibraryEnrichmentCandidate(song with { Sources = [.. song.Sources], KnownSources = [.. song.KnownSources ?? []] },
-                    EnrichmentSourceKey(song), Library.Details.GetValueOrDefault(song.Id) ?? new())).ToArray();
+            snapshot = Library.Songs.Where(song => availability.GetValueOrDefault(song.Id)).Select(song =>
+                (song with { Sources = new List<string>(song.Sources), KnownSources = new List<string>(song.KnownSources ?? []) },
+                    Library.Details.GetValueOrDefault(song.Id) ?? new())).ToArray();
+            scanCache = new(Library.ScanCache, StringComparer.OrdinalIgnoreCase);
         }
+        // Hashing and work-list construction do not hold the lock used by foreground operations.
+        return snapshot.Select(value => new LibraryEnrichmentCandidate(value.Song,
+            EnrichmentSourceKey(value.Song, scanCache), value.Details)).ToArray();
     }
     public string? GetEnrichmentSourceKey(string songId)
     {
@@ -44,11 +50,90 @@ public sealed partial class MainViewModel
             return songItems.TryGetValue(songId, out var item) ? EnrichmentSourceKey(item.Song) : null;
         }
     }
-    private string EnrichmentSourceKey(Song song)
+    public CachedArtistProfile? GetCachedArtistProfile(MusicExternalId id)
+    {
+        lock (searchIndexGate) return Library.ArtistProfiles.GetValueOrDefault(CachedArtistProfile.Key(id));
+    }
+
+    public Task<bool> SaveBackgroundAutomaticLookupAsync(string id, SongLookupInput expected, SongLookupResult result,
+        Func<bool>? canPublish = null)
+    {
+        lock (searchIndexGate)
+        {
+            if (disposed || ReadOnly || !(canPublish?.Invoke() ?? true) || GetLookupInput(id)?.Key != expected.Key) return Task.FromResult(false);
+            var current = Library.Details.GetValueOrDefault(id) ?? new();
+            if (current.Online != expected.Details.Online) return Task.FromResult(false);
+            var updated = current with
+            {
+                Online = current.Online is null || current.Online.SourceUrl.Contains("lrclib.net", StringComparison.OrdinalIgnoreCase)
+                    ? result.Metadata ?? current.Online : current.Online,
+                OnlineLyrics = current.OnlineLyrics ?? result.Lyrics,
+                Lookup = new(expected.Key, clock.GetUtcNow(), result.MetadataOutcome, result.LyricsOutcome)
+            };
+            Library.Details[id] = updated;
+            backgroundMetadataRevision++;
+            // Lyrics and retry timestamps do not change the searchable projection.
+            if (updated.Online != current.Online) QueueBackgroundSearchRefresh();
+            QueueBackgroundMetadataWrite();
+            FindSong(id)?.ApplyDetails(updated);
+            if (updated.Online != current.Online) RefreshDetailsPresentation();
+        }
+        LibrarySourcesChanged?.Invoke(this, EventArgs.Empty);
+        return Task.FromResult(true);
+    }
+
+    public Task<bool> SaveBackgroundAssetsAsync(string id, string sourceKey, SongLookupInput expected,
+        IReadOnlyList<MusicArtistCredit> credits, IReadOnlyList<CachedArtistProfile> profiles, bool unavailable, Func<bool> canPublish,
+        DateTimeOffset? creditsCheckedAt = null, bool missingArtwork = false)
+    {
+        lock (searchIndexGate)
+        {
+            if (disposed || ReadOnly || !canPublish() || GetEnrichmentSourceKey(id) != sourceKey
+                || GetLookupInput(id)?.Key != expected.Key) return Task.FromResult(false);
+            var current = Library.Details.GetValueOrDefault(id) ?? new();
+            if (current.Online != expected.Details.Online || current.Local != expected.Details.Local) return Task.FromResult(false);
+            SongMetadata? AddCredits(SongMetadata? metadata)
+            {
+                if (metadata is null || credits.Count == 0) return metadata;
+                var combined = metadata.ArtistCredits.ToList();
+                foreach (var credit in credits)
+                {
+                    int index = combined.FindIndex(old => old.Role == credit.Role && (
+                        (old.ExternalIds ?? []).Intersect(credit.ExternalIds ?? []).Any()
+                        || old.Name == credit.Name && !(old.ExternalIds ?? []).Any(prior => (credit.ExternalIds ?? []).Any(next =>
+                            prior.Provider == next.Provider && prior.Kind == next.Kind && prior.Value != next.Value))));
+                    if (index < 0) combined.Add(credit);
+                    else
+                    {
+                        var previous = combined[index];
+                        var ids = (previous.ExternalIds ?? []).Concat(credit.ExternalIds ?? []).Distinct().ToArray();
+                        if (!ids.SequenceEqual(previous.ExternalIds ?? [])) combined[index] = previous with { ExternalIds = ids };
+                    }
+                }
+                return combined.SequenceEqual(metadata.ArtistCredits) ? metadata : metadata with { ArtistCredits = combined.ToArray() };
+            }
+            var online = AddCredits(current.Online);
+            var local = current.Online is null ? AddCredits(current.Local) : current.Local;
+            var updated = current with { Online = online, Local = local };
+            string assetKey = SongAssetState.Identity(expected with { Details = updated });
+            updated = updated with { Assets = new(assetKey, clock.GetUtcNow(), unavailable)
+                { MissingArtwork = missingArtwork, CreditsCheckedAt = creditsCheckedAt
+                    ?? (current.Assets?.Key == assetKey ? current.Assets.CreditsCheckedAt : null) } };
+            Library.Details[id] = updated;
+            foreach (var profile in profiles) Library.ArtistProfiles[CachedArtistProfile.Key(profile.Identity)] = profile;
+            backgroundMetadataRevision++;
+            if (online != current.Online || local != current.Local) QueueBackgroundSearchRefresh();
+            QueueBackgroundMetadataWrite();
+            FindSong(id)?.ApplyDetails(updated);
+        }
+        return Task.FromResult(true);
+    }
+    private string EnrichmentSourceKey(Song song) => EnrichmentSourceKey(song, Library.ScanCache);
+    private static string EnrichmentSourceKey(Song song, IReadOnlyDictionary<string, FileScanCache> scanCache)
     {
         string identity = string.Join('\n', song.Sources.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).Select(path =>
         {
-            var cache = Library.ScanCache.GetValueOrDefault(path);
+            var cache = scanCache.GetValueOrDefault(path);
             return path.ToUpperInvariant() + "\t" + cache?.Length + "\t" + cache?.ModifiedUtcTicks;
         }));
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
@@ -87,7 +172,7 @@ public sealed partial class MainViewModel
     {
         try
         {
-            await Task.Delay(150, backgroundMetadataLifetime.Token);
+            await Task.Delay(750, backgroundMetadataLifetime.Token);
             while (!disposed)
             {
                 Task? pending;
@@ -130,16 +215,21 @@ public sealed partial class MainViewModel
     {
         try
         {
-            await Task.WhenAny(Task.Delay(500, backgroundMetadataLifetime.Token), flush);
+            await Task.WhenAny(Task.Delay(1500, backgroundMetadataLifetime.Token), flush);
             while (!disposed)
             {
+                // Wait for the captured index batch, not the refresh pump: a continuous
+                // stream of tags must not postpone durable progress until the scan ends.
+                Task? indexBatch;
+                lock (searchIndexGate) indexBatch = searchBuildTask;
+                if (indexBatch is not null) await indexBatch;
                 long revision;
                 Task write;
                 lock (searchIndexGate)
                 {
                     revision = backgroundMetadataRevision;
                     if (revision == persistedMetadataRevision) return;
-                    write = Store.SaveAsync(Library);
+                    write = Store.SaveAsync(Library, reconcileCatalog: false);
                 }
                 try
                 {
@@ -154,7 +244,7 @@ public sealed partial class MainViewModel
                     return;
                 }
                 lock (searchIndexGate) if (backgroundMetadataRevision == persistedMetadataRevision) return;
-                await Task.Delay(500, backgroundMetadataLifetime.Token);
+                await Task.Delay(1500, backgroundMetadataLifetime.Token);
             }
         }
         catch (OperationCanceledException) when (backgroundMetadataLifetime.IsCancellationRequested) { }

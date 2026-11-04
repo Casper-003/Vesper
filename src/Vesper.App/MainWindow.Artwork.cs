@@ -21,97 +21,120 @@ public sealed class CoverColorConverter : IValueConverter
 
 public sealed partial class MainWindow
 {
-    private readonly Dictionary<string, Task> coverLoads = [];
-    private readonly SemaphoreSlim coverSlots = new(2, 2);
-    private Task LoadCoverAsync(LibrarySongItem song)
+    private sealed class CoverRead(Task work, CancellationToken owner)
     {
-        if (closed || song.Cover is not null) return Task.CompletedTask;
-        string key = song.Song.Id + "\n" + song.CoverUrl;
-        if (coverLoads.TryGetValue(key, out var pending) && !pending.IsCompleted) return pending;
-        return coverLoads[key] = ReadCoverAsync(song);
+        internal Task Work { get; } = work;
+        internal CancellationToken Owner { get; } = owner;
+    }
+    private readonly Dictionary<string, CoverRead> coverLoads = [];
+    private readonly SemaphoreSlim coverSlots = new(2, 2);
+    private readonly ArtworkDiskCache artworkCache = new(lookupHttp, ArtworkCacheDirectory());
+    private static string ArtworkCacheDirectory()
+    {
+        string? report = Environment.GetEnvironmentVariable("VESPER_ARTWORK_CHECK_PATH")
+            ?? Environment.GetEnvironmentVariable("VESPER_PAGE_CHECK_PATH")
+            ?? Environment.GetEnvironmentVariable("VESPER_COLOR_CHECK_PATH");
+        if (report is { Length: > 0 })
+            return Path.Combine(Path.GetDirectoryName(Path.GetFullPath(report))!, "artwork-check-cache-" + Environment.ProcessId);
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Vesper", "Artwork");
+    }
+    private async Task LoadCoverAsync(LibrarySongItem song, CancellationToken token = default)
+    {
+        for (int generation = 0; generation < 3; generation++)
+        {
+            token.ThrowIfCancellationRequested();
+            if (closed || song.Cover is not null) return;
+            string identity = song.ArtworkIdentity;
+            string key = song.Song.Id + "\n" + identity;
+            if (coverLoads.TryGetValue(key, out var pending))
+            {
+                // The waiter only cancels its own wait. The existing owner's read
+                // continues unless that owner's navigation or window is canceled.
+                try { await pending.Work.WaitAsync(token); }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
+                token.ThrowIfCancellationRequested();
+                if (song.ArtworkIdentity != identity) continue;
+                if (song.Cover is not null || !pending.Owner.IsCancellationRequested) return;
+                // A canceled page preparation may finish without producing art.
+                // It must not make the next owner treat the missing bitmap as ready.
+                if (coverLoads.GetValueOrDefault(key) == pending) coverLoads.Remove(key);
+            }
+            var read = new CoverRead(ReadCoverAsync(song, identity, token), token);
+            coverLoads[key] = read;
+            _ = ForgetCoverLoadAsync(key, read);
+            await read.Work.WaitAsync(token);
+            token.ThrowIfCancellationRequested();
+            if (song.ArtworkIdentity != identity) continue;
+            // An unillustrated video or absent embedded image is a settled placeholder.
+            return;
+        }
+    }
+    private async Task ForgetCoverLoadAsync(string key, CoverRead read)
+    {
+        await read.Work;
+        if (coverLoads.GetValueOrDefault(key) == read) coverLoads.Remove(key);
     }
 
-    private async Task ReadCoverAsync(LibrarySongItem song)
+    private async Task ReadCoverAsync(LibrarySongItem song, string identity, CancellationToken token)
     {
-        string identity = song.CoverUrl;
+        using var operation = CancellationTokenSource.CreateLinkedTokenSource(metadataCancellation.Token, token);
+        var readToken = operation.Token;
+        string coverUrl = song.CoverUrl;
         bool entered = false;
+        bool Current() => !closed && !readToken.IsCancellationRequested && song.ArtworkIdentity == identity;
         try
         {
-            await coverSlots.WaitAsync(metadataCancellation.Token); entered = true;
+            await coverSlots.WaitAsync(readToken); entered = true;
+            if (!Current() || song.Cover is not null) return;
             byte[]? bytes = null;
-            if (Uri.TryCreate(identity, UriKind.Absolute, out var url) && url.Scheme == "https"
-                && (url.Host == "coverartarchive.org" || url.Host.EndsWith(".music.126.net", StringComparison.OrdinalIgnoreCase)
-                    || url.Host.EndsWith(".dzcdn.net", StringComparison.OrdinalIgnoreCase)))
+            if (Uri.TryCreate(coverUrl, UriKind.Absolute, out var url) && ArtworkDiskCache.IsAllowed(url))
             {
-                var larger = identity.EndsWith("/front-500", StringComparison.Ordinal) ? new Uri(identity[..^3] + "1200") : url;
-                try { bytes = await DownloadCoverAsync(larger); }
-                catch (Exception) when (larger != url && !metadataCancellation.IsCancellationRequested)
-                { bytes = await DownloadCoverAsync(url); }
+                var larger = coverUrl.EndsWith("/front-500", StringComparison.Ordinal) ? new Uri(coverUrl[..^3] + "1200") : url;
+                try { bytes = await DownloadCoverAsync(larger, readToken); }
+                catch (Exception) when (larger != url && !readToken.IsCancellationRequested)
+                { bytes = await DownloadCoverAsync(url, readToken); }
             }
             else
             {
-                string? path = await Task.Run(() => song.Song.AvailablePath, metadataCancellation.Token);
+                string? path = await Task.Run(() => song.Song.AvailablePath, readToken);
                 if (path is null || IsVideoFile(path)) return;
-                var file = await StorageFile.GetFileFromPathAsync(path);
+                var file = await StorageFile.GetFileFromPathAsync(path).AsTask(readToken);
                 using var thumbnail = await file.GetThumbnailAsync(ThumbnailMode.MusicView, 600,
-                    ThumbnailOptions.UseCurrentScale).AsTask(metadataCancellation.Token);
+                    ThumbnailOptions.UseCurrentScale).AsTask(readToken);
                 if (thumbnail is null || thumbnail.Type != ThumbnailType.Image) return;
                 using var source = thumbnail.AsStreamForRead();
-                bytes = await ReadCoverBytesAsync(source, metadataCancellation.Token);
+                bytes = await ReadCoverBytesAsync(source, readToken);
             }
-            if (bytes is null || closed || song.CoverUrl != identity) return;
+            if (bytes is null || !Current()) return;
             // Download once: the same bytes feed a tiny palette decode and the displayed artwork.
             uint color = await Task.Run(async () =>
             {
                 using var stream = new MemoryStream(bytes).AsRandomAccessStream();
-                var decoder = await BitmapDecoder.CreateAsync(stream);
+                var decoder = await BitmapDecoder.CreateAsync(stream).AsTask(readToken);
                 var pixels = await decoder.GetPixelDataAsync(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Straight,
                     new BitmapTransform { ScaledWidth = 64, ScaledHeight = 64 }, ExifOrientationMode.IgnoreExifOrientation,
-                    ColorManagementMode.DoNotColorManage);
+                    ColorManagementMode.DoNotColorManage).AsTask(readToken);
                 return CoverPalette.DominantArgb(pixels.DetachPixelData());
-            }, metadataCancellation.Token);
+            }, readToken);
+            if (!Current()) return;
             using var imageStream = new MemoryStream(bytes).AsRandomAccessStream();
             var image = new BitmapImage { DecodePixelWidth = 1200 };
-            await image.SetSourceAsync(imageStream);
-            if (!closed && song.CoverUrl == identity) { song.CoverColor = color; song.Cover = image; }
+            await image.SetSourceAsync(imageStream).AsTask(readToken);
+            if (Current())
+            {
+                RememberArtworkSwatch(image, color);
+                song.CoverColor = color; song.Cover = image;
+            }
         }
         catch (Exception) { /* Failed artwork keeps a neutral header and the existing placeholder. */ }
         finally { if (entered) coverSlots.Release(); }
     }
     private async Task<byte[]> DownloadCoverAsync(Uri url)
+        => await DownloadCoverAsync(url, metadataCancellation.Token);
+    private async Task<byte[]> DownloadCoverAsync(Uri url, CancellationToken token)
     {
-        string cacheDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Vesper", "Artwork");
-        string key = System.Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(url.AbsoluteUri)));
-        string cachePath = Path.Combine(cacheDirectory, key + ".image");
-        try
-        {
-            if (File.Exists(cachePath) && new FileInfo(cachePath).Length is > 0 and <= 8388608)
-                return await File.ReadAllBytesAsync(cachePath, metadataCancellation.Token);
-        }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(metadataCancellation.Token);
-        timeout.CancelAfter(TimeSpan.FromSeconds(15));
-        using var response = await lookupHttp.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
-        response.EnsureSuccessStatusCode();
-        using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
-        byte[] bytes = await ReadCoverBytesAsync(stream, timeout.Token);
-        string temporary = cachePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try
-        {
-            Directory.CreateDirectory(cacheDirectory);
-            await File.WriteAllBytesAsync(temporary, bytes, timeout.Token);
-            File.Move(temporary, cachePath, overwrite: true);
-        }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
-        finally
-        {
-            try { if (File.Exists(temporary)) File.Delete(temporary); }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
-        }
-        return bytes;
+        string path = await artworkCache.GetAsync(url, token);
+        return await File.ReadAllBytesAsync(path, token);
     }
     private static async Task<byte[]> ReadCoverBytesAsync(Stream stream, CancellationToken token)
     {

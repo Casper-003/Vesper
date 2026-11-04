@@ -17,7 +17,10 @@ public sealed partial class MainWindow
     private static string? SearchCheckStorePath()
     {
         string? report = Environment.GetEnvironmentVariable("VESPER_SEARCH_CHECK_PATH")
-            ?? Environment.GetEnvironmentVariable("VESPER_NAVIGATION_CHECK_PATH");
+            ?? Environment.GetEnvironmentVariable("VESPER_NAVIGATION_CHECK_PATH")
+            ?? Environment.GetEnvironmentVariable("VESPER_ARTWORK_CHECK_PATH")
+            ?? Environment.GetEnvironmentVariable("VESPER_PAGE_CHECK_PATH")
+            ?? Environment.GetEnvironmentVariable("VESPER_COLOR_CHECK_PATH");
         if (report is null) return null;
         if (string.IsNullOrWhiteSpace(report))
             throw new InvalidOperationException("VESPER_SEARCH_CHECK_PATH requires a report filename.");

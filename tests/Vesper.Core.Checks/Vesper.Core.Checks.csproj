@@ -11,6 +11,7 @@
     <Compile Include="../../src/Vesper.App/MainViewModel.Details.cs" Link="App/MainViewModel.Details.cs" />
     <Compile Include="../../src/Vesper.App/MainViewModel.Catalog.cs" Link="App/MainViewModel.Catalog.cs" />
     <Compile Include="../../src/Vesper.App/MainViewModel.Enrichment.cs" Link="App/MainViewModel.Enrichment.cs" />
+    <Compile Include="../../src/Vesper.App/MainViewModel.BackgroundVideo.cs" Link="App/MainViewModel.BackgroundVideo.cs" />
     <Compile Include="../../src/Vesper.App/LibraryEnrichmentController.cs" Link="App/LibraryEnrichmentController.cs" />
     <Compile Include="../../src/Vesper.App/MainViewModel.Search.cs" Link="App/MainViewModel.Search.cs" />
     <Compile Include="../../src/Vesper.App/LibraryPresentation.cs" Link="App/LibraryPresentation.cs" />

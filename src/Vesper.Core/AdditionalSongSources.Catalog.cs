@@ -14,7 +14,10 @@ public sealed partial class AdditionalSongSources
             var album = track.GetProperty("album");
             result.Add(new("deezer:" + track.GetProperty("id"), album.GetProperty("id").ToString(), name,
                 MusicBrainzClient.Text(track.GetProperty("artist"), "name"), MusicBrainzClient.Text(album, "title"), "", "",
-                CoverUrl: MusicBrainzClient.Text(album, "cover_xl")));
+                CoverUrl: MusicBrainzClient.Text(album, "cover_xl"))
+                { ArtistCredits = track.GetProperty("artist").TryGetProperty("id", out var artistId)
+                    ? [new(MusicBrainzClient.Text(track.GetProperty("artist"), "name"), ExternalIds:
+                        [new("deezer", "artist", artistId.ToString())])] : [] });
         }
         return result;
     }

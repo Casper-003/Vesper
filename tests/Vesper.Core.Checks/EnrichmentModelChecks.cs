@@ -9,6 +9,7 @@ internal static class EnrichmentModelChecks
         await CheckStaleResultsAsync(root, check);
         await CheckSourceReplacementAsync(root, check);
         await CheckRetryAsync(root, check);
+        await CheckLyricsAndAssetsAsync(root, check);
     }
 
     private static async Task CheckAutomaticCoverageAsync(string root, Action<bool, string> check)
@@ -26,12 +27,12 @@ internal static class EnrichmentModelChecks
                 if (Interlocked.Increment(ref reads) == 2) reading.TrySetResult();
                 await release.Task.WaitAsync(token);
                 return new(song.Sources[0], song.Title == "LocalSong"
-                    ? new(song.Title, "标签艺人", "标签专辑") : new(song.Title), "1080p");
+                    ? new(song.Title, "标签艺人", "标签专辑", Lyrics: "已嵌入歌词") : new(song.Title), "1080p");
             }
             Task<SongLookupResult> Lookup(SongLookupInput input, CancellationToken token)
             {
                 Interlocked.Increment(ref requests);
-                return Task.FromResult(new SongLookupResult(new("OnlineSong", "联网艺人", "联网专辑"), null,
+                return Task.FromResult(new SongLookupResult(new("OnlineSong", "联网艺人", "联网专辑"), Lyrics("OnlineSong", "联网艺人"),
                     LookupOutcome.Matched, LookupOutcome.Matched));
             }
             using var controller = new LibraryEnrichmentController(model, Read, Lookup, ui.Run);
@@ -90,6 +91,8 @@ internal static class EnrichmentModelChecks
             }
             async Task<SongLookupResult> Lookup(SongLookupInput input, CancellationToken token)
             {
+                if (input.Details.Corrections is not null)
+                    return new(null, null, LookupOutcome.Matched, LookupOutcome.NotFound);
                 entered.TrySetResult();
                 await release.Task; // Deliberately ignore cancellation to exercise the publication guard.
                 return new(new("PendingSong", "过期联网艺人", "过期联网专辑"), null, LookupOutcome.Matched, LookupOutcome.Matched);
@@ -110,7 +113,7 @@ internal static class EnrichmentModelChecks
                     scenario == "local-remove" ? "移除目录后忽略取消的标签读取不能恢复旧来源或发布旧资料"
                         : "移除目录后忽略取消的联网结果不能补回资料或记录失败");
             else check(details.Effective("").Artist == "保留艺人" && details.Effective("").Album == ""
-                    && details.Online is null && details.Lookup is null
+                    && details.Online is null && details.Lookup?.Key == model.GetLookupInput(id)?.Key
                     && model.SearchIndex!.Search("保留艺人", 2010).Artists.Items.Count == 1
                     && model.SearchIndex.Search("过期联网专辑", 2011).Albums.Items.Count == 0,
                     "后台检索期间改正身份并显式清空专辑，晚到结果无写入权且不恢复旧专辑");
@@ -130,10 +133,10 @@ internal static class EnrichmentModelChecks
             if (Interlocked.Increment(ref calls) == 1)
             {
                 entered.TrySetResult(); await release.Task;
-                return new(media, new(song.Title, "替换前艺人", "替换前专辑"));
+                return new(media, new(song.Title, "替换前艺人", "替换前专辑", Lyrics: "旧本地歌词"));
             }
             replacementRead.TrySetResult();
-            return new(media, new(song.Title, "替换后艺人", "替换后专辑"));
+            return new(media, new(song.Title, "替换后艺人", "替换后专辑", Lyrics: "新本地歌词"));
         }
         using var controller = new LibraryEnrichmentController(model, Read,
             (_, _) => throw new InvalidOperationException("complete local tags need no network"), ui.Run);
@@ -165,7 +168,7 @@ internal static class EnrichmentModelChecks
             int attempt = Interlocked.Increment(ref requests);
             return Task.FromResult(attempt == 1 ? new SongLookupResult(null, null, LookupOutcome.Unavailable, LookupOutcome.Unavailable)
                 : attempt == 2 ? new(null, null, LookupOutcome.NotFound, LookupOutcome.NotFound)
-                : new(new("RetrySong", "恢复艺人", "恢复专辑"), null, LookupOutcome.Matched, LookupOutcome.Matched));
+                : new(new("RetrySong", "恢复艺人", "恢复专辑"), Lyrics("RetrySong", "恢复艺人"), LookupOutcome.Matched, LookupOutcome.Matched));
         }
         using var controller = new LibraryEnrichmentController(model, Read, Lookup, ui.Run, clock);
         controller.Start();
@@ -193,6 +196,85 @@ internal static class EnrichmentModelChecks
             && controller.State.Online.WaitingRetryCount == 0,
             "冷却结束后自动恢复补全并更新专辑搜索，成功结果停止重试");
     }
+
+    private static async Task CheckLyricsAndAssetsAsync(string root, Action<bool, string> check)
+    {
+        string folder = await CreateMediaAsync(root, "enrichment-assets", "LyricSong", "TaggedSong");
+        using var ui = new SerialDispatcher();
+        using var model = new MainViewModel(Path.Combine(root, "enrichment-assets.json"));
+        await ui.Run(async () => { await model.InitializeAsync(); await model.AddDirectoryAsync(folder); });
+        int requests = 0, assets = 0, active = 0, maxActive = 0;
+        var entered = Signal(); var release = Signal();
+        Task<LibraryMetadataRead?> Read(Song song, CancellationToken token) => Task.FromResult<LibraryMetadataRead?>(
+            new(song.Sources[0], new(song.Title, "完整标签艺人", "完整标签专辑",
+                Lyrics: song.Title == "TaggedSong" ? "已有标签歌词" : "")));
+        Task<SongLookupResult> Lookup(SongLookupInput input, CancellationToken token)
+        {
+            Interlocked.Increment(ref requests);
+            var effective = input.Details.Effective("");
+            return Task.FromResult(new SongLookupResult(new(effective.Title, effective.Artist, effective.Album,
+                CoverUrl: "https://coverartarchive.org/release/example/front-500"),
+                effective.Lyrics.Length == 0 ? Lyrics(effective.Title, effective.Artist) : null,
+                LookupOutcome.Matched, LookupOutcome.Matched));
+        }
+        async Task<LibraryEnrichmentOutcome> Assets(LibraryEnrichmentTicket ticket, string sourceKey)
+        {
+            int current = Interlocked.Increment(ref active);
+            maxActive = Math.Max(maxActive, current);
+            Interlocked.Increment(ref assets);
+            await ui.Run(() =>
+            {
+                check(model.GetEnrichmentSourceKey(ticket.SongId) == sourceKey
+                    && model.GetLookupInput(ticket.SongId)?.Details.Online?.CoverUrl.Length > 0,
+                    "后台图片回调在已发布的身份与封面资料之后执行，并保留当前来源票据");
+                return Task.CompletedTask;
+            });
+            entered.TrySetResult();
+            await release.Task.WaitAsync(ticket.CancellationToken);
+            Interlocked.Decrement(ref active);
+            return LibraryEnrichmentOutcome.Completed;
+        }
+        using (var controller = new LibraryEnrichmentController(model, Read, Lookup, ui.Run, synchronizeAssets: Assets))
+        {
+            controller.Start();
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            check(model.CanManage && controller.State.Online.ActiveCount == 1 && requests is >= 1 and <= 2 && assets == 1,
+                "完整本地标签同样自动发现图片身份，联网与图片共用单路队列，前台管理保持可用");
+            release.TrySetResult();
+            await controller.WhenIdleAsync().WaitAsync(TimeSpan.FromSeconds(15));
+            check(requests == 2 && assets == 2 && maxActive == 1
+                && model.Library.Details.Values.All(details => details.Effective("").Lyrics.Length > 0),
+                "仅缺歌词的歌曲不需打开详情即可补全，完整标签歌曲也进入图片采集且不并发堆积");
+        }
+
+        // Asset work has its own retry state; a metadata/lyrics negative-cache interval
+        // must not prevent a known cover from being downloaded.
+        int coolingRequests = 0, coolingAssets = 0;
+        await ui.Run(() =>
+        {
+            foreach (var song in model.Library.Songs)
+            {
+                var input = model.GetLookupInput(song.Id)!;
+                model.Library.Details[song.Id] = input.Details with
+                {
+                    OnlineLyrics = null,
+                    Lookup = new(input.Key, DateTimeOffset.UtcNow, LookupOutcome.NotFound, LookupOutcome.NotFound)
+                };
+            }
+            return Task.CompletedTask;
+        });
+        using var cooling = new LibraryEnrichmentController(model,
+            (_, _) => throw new InvalidOperationException("unchanged media must be reused"),
+            (_, _) => { Interlocked.Increment(ref coolingRequests); throw new InvalidOperationException("lookup still cooling down"); },
+            ui.Run, synchronizeAssets: (_, _) => { Interlocked.Increment(ref coolingAssets); return Task.FromResult(LibraryEnrichmentOutcome.Completed); });
+        cooling.Start();
+        await cooling.WhenIdleAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        check(coolingRequests == 0 && coolingAssets == 2 && cooling.State.Online.WaitingRetryCount == 1,
+            "歌词查无匹配的冷却不会阻塞已知图片同步，仍缺歌词的曲目保留延后重试");
+    }
+
+    private static SongLyrics Lyrics(string title, string artist) => new("已同步歌词", "", "", false,
+        "https://lrclib.net/api/get/1", title, artist, 180, true);
 
     private static async Task<string> CreateMediaAsync(string root, string name, params string[] titles)
     {
