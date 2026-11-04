@@ -8,8 +8,17 @@ public sealed partial class MainWindow
     {
         canSave = false;
         var failures = new List<string>();
-        object? result = null;
-        try { result = await CheckOverviewNavigationAsync(failures); }
+        object? result = null, interactions = null;
+        bool interactionsOnly = Environment.GetEnvironmentVariable("VESPER_NAVIGATION_CHECK_SCOPE") == "interactions";
+        if (!interactionsOnly)
+        {
+            try { result = await CheckOverviewNavigationAsync(failures); }
+            catch (Exception ex) { failures.Add(ex.ToString()); }
+        }
+        try
+        {
+            interactions = await CheckNavigationInteractionsAsync(failures);
+        }
         catch (Exception ex) { failures.Add(ex.ToString()); }
         try
         {
@@ -17,7 +26,7 @@ public sealed partial class MainWindow
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             await File.WriteAllTextAsync(path, JsonSerializer.Serialize(new
             {
-                Passed = failures.Count == 0, Result = result, Failures = failures,
+                Passed = failures.Count == 0, Result = result, Interactions = interactions, Failures = failures,
                 Limitations = "Isolated synthetic Frame navigation and Root render samples. No real library, online lookups, desktop automation or manual visual acceptance. Native Mica is replaced only during pixel capture."
             }, new JsonSerializerOptions { WriteIndented = true }));
         }

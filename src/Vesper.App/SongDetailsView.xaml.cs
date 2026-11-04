@@ -1,7 +1,10 @@
 using System.ComponentModel;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Data;
+using Microsoft.UI.Xaml.Documents;
+using Microsoft.UI.Xaml.Input;
 using Vesper.Core;
 
 namespace Vesper.App;
@@ -11,6 +14,11 @@ public sealed partial class SongDetailsView : UserControl
     private readonly MainWindow host;
     private readonly string songId;
     private bool dialogOpen;
+    private LibrarySongItem? observedSong;
+    private SongEntityLinkState? renderedEntityLinks;
+    private readonly Dictionary<Hyperlink, (string Id, bool Album)> entityLinkTargets = [];
+    private bool entityRefreshQueued;
+    private long entityRefreshGeneration;
     private LibrarySongItem? Song => DataContext as LibrarySongItem;
 
     public SongDetailsView(MainWindow host, string songId)
@@ -32,20 +40,155 @@ public sealed partial class SongDetailsView : UserControl
 
     private void RefreshSong()
     {
-        DataContext = host.Model.FindSong(songId);
+        var current = host.Model.FindSong(songId);
+        if (IsLoaded && !ReferenceEquals(observedSong, current))
+        {
+            if (observedSong is not null) observedSong.PropertyChanged -= OnSongChanged;
+            observedSong = current;
+            if (observedSong is not null) observedSong.PropertyChanged += OnSongChanged;
+        }
+        DataContext = current;
         EditButton.IsEnabled = SearchButton.IsEnabled = !host.Model.ReadOnly && Song is not null;
+        RefreshEntityLinks();
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        host.Model.PropertyChanged -= OnLibraryChanged;
         host.Model.PropertyChanged += OnLibraryChanged;
+        host.Model.SearchIndexChanged -= OnCatalogChanged;
+        host.Model.SearchIndexChanged += OnCatalogChanged;
         RefreshSong();
         if (Song is { } song) await host.LoadDetailsAsync(song);
     }
 
-    private void OnUnloaded(object sender, RoutedEventArgs e) => host.Model.PropertyChanged -= OnLibraryChanged;
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        host.Model.PropertyChanged -= OnLibraryChanged;
+        host.Model.SearchIndexChanged -= OnCatalogChanged;
+        if (observedSong is not null) observedSong.PropertyChanged -= OnSongChanged;
+        observedSong = null;
+        entityRefreshGeneration++;
+        entityRefreshQueued = false;
+    }
     private void OnLibraryChanged(object? sender, PropertyChangedEventArgs e)
-    { if (e.PropertyName == nameof(MainViewModel.LibrarySummary)) RefreshSong(); }
+    { if (string.IsNullOrEmpty(e.PropertyName) || e.PropertyName == nameof(MainViewModel.LibrarySummary)) QueueEntityRefresh(); }
+    private void OnCatalogChanged(object? sender, EventArgs e) => QueueEntityRefresh();
+    private void OnSongChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (string.IsNullOrEmpty(e.PropertyName) || e.PropertyName is nameof(LibrarySongItem.Title) or nameof(LibrarySongItem.ArtistDetail)
+            or nameof(LibrarySongItem.Album) or nameof(LibrarySongItem.HasArtist) or nameof(LibrarySongItem.HasAlbum)) QueueEntityRefresh();
+    }
+    private void QueueEntityRefresh()
+    {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(QueueEntityRefresh);
+            return;
+        }
+        if (entityRefreshQueued) return;
+        entityRefreshQueued = true;
+        long generation = entityRefreshGeneration;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (generation != entityRefreshGeneration) return;
+            entityRefreshQueued = false;
+            if (IsLoaded) RefreshSong();
+        });
+    }
+
+    private void RefreshEntityLinks()
+    {
+        var links = host.GetSongEntityLinks(songId);
+        if (SameEntityLinks(renderedEntityLinks, links)) return;
+        (string Id, bool Album)? focusedTarget = null;
+        if (XamlRoot is not null && FocusManager.GetFocusedElement(XamlRoot) is Hyperlink focused
+            && entityLinkTargets.TryGetValue(focused, out var target)) focusedTarget = target;
+        entityLinkTargets.Clear();
+        ArtistValue.Inlines.Clear(); AlbumValue.Inlines.Clear();
+        renderedEntityLinks = links;
+        AppendArtistLinks(links);
+        if (links.Album is { } album) AlbumValue.Inlines.Add(CreateEntityLink(album, links.AlbumText, true));
+        else AlbumValue.Inlines.Add(new Run { Text = links.AlbumText });
+        if (focusedTarget is { } previous)
+        {
+            var replacement = entityLinkTargets.FirstOrDefault(pair => pair.Value == previous).Key
+                ?? entityLinkTargets.Keys.FirstOrDefault();
+            if (replacement is not null) replacement.Focus(FocusState.Programmatic);
+            else if (IsLoaded && EditButton.IsEnabled) EditButton.Focus(FocusState.Programmatic);
+            else if (IsLoaded) DetailsScroll.Focus(FocusState.Programmatic);
+        }
+    }
+
+    private void AppendArtistLinks(SongEntityLinkState links)
+    {
+        if (links.Artists.Count == 0) { ArtistValue.Inlines.Add(new Run { Text = links.ArtistText }); return; }
+        var spans = new List<(int Start, int Length, SongEntityLinkTarget Target)>();
+        // Preserve original credited spelling and join phrases whenever each
+        // catalog performer can be located without overlapping another credit.
+        foreach (var artist in links.Artists.OrderByDescending(artist => artist.Aliases.Append(artist.Name).Max(name => name.Length)))
+        {
+            (int Start, int Length)? found = null;
+            foreach (string name in artist.Aliases.Append(artist.Name).Where(name => name.Length > 0).Distinct().OrderByDescending(name => name.Length))
+            {
+                int start = 0;
+                while (start < links.ArtistText.Length)
+                {
+                    int index = links.ArtistText.IndexOf(name, start, StringComparison.OrdinalIgnoreCase);
+                    if (index < 0) break;
+                    if (!spans.Any(span => index < span.Start + span.Length && index + name.Length > span.Start))
+                    { found = (index, name.Length); break; }
+                    start = index + name.Length;
+                }
+                if (found is not null) break;
+            }
+            if (found is { } match) spans.Add((match.Start, match.Length, artist));
+        }
+        if (spans.Count == links.Artists.Count)
+        {
+            int start = 0;
+            foreach (var span in spans.OrderBy(span => span.Start))
+            {
+                if (span.Start > start) ArtistValue.Inlines.Add(new Run { Text = links.ArtistText[start..span.Start] });
+                ArtistValue.Inlines.Add(CreateEntityLink(span.Target, links.ArtistText.Substring(span.Start, span.Length), false));
+                start = span.Start + span.Length;
+            }
+            if (start < links.ArtistText.Length) ArtistValue.Inlines.Add(new Run { Text = links.ArtistText[start..] });
+        }
+        else
+        {
+            // Structured credits remain separately navigable even when their
+            // authoritative names cannot safely be mapped into legacy text.
+            foreach (var artist in links.Artists)
+            {
+                if (ArtistValue.Inlines.Count > 0) ArtistValue.Inlines.Add(new Run { Text = " / " });
+                ArtistValue.Inlines.Add(CreateEntityLink(artist, artist.Name, false));
+            }
+        }
+    }
+
+    private Hyperlink CreateEntityLink(SongEntityLinkTarget target, string text, bool album)
+    {
+        var link = new Hyperlink { IsTabStop = true };
+        link.Inlines.Add(new Run { Text = text });
+        AutomationProperties.SetName(link, text);
+        AutomationProperties.SetHelpText(link, album ? "查看专辑详情" : "查看艺人详情");
+        entityLinkTargets.Add(link, (target.Id, album));
+        link.Click += (_, _) =>
+        {
+            if (album) host.OpenSongAlbum(songId, target.Id);
+            else host.OpenSongArtist(songId, target.Id);
+            if (IsLoaded) RefreshSong();
+        };
+        return link;
+    }
+
+    private static bool SameEntityLinks(SongEntityLinkState? before, SongEntityLinkState after) => before is not null
+        && before.SongId == after.SongId && before.ArtistText == after.ArtistText && before.AlbumText == after.AlbumText
+        && SameTarget(before.Album, after.Album) && before.Artists.Count == after.Artists.Count
+        && before.Artists.Zip(after.Artists).All(pair => SameTarget(pair.First, pair.Second));
+    private static bool SameTarget(SongEntityLinkTarget? before, SongEntityLinkTarget? after) => before is null ? after is null
+        : after is not null && before.Id == after.Id && before.Name == after.Name && before.Aliases.SequenceEqual(after.Aliases);
     private async void OnFavorite(object sender, RoutedEventArgs e)
     { if (Song is { } song) await host.Model.ToggleFavoriteAsync(song); }
     private async void OnQueue(object sender, RoutedEventArgs e)

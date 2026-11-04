@@ -4,7 +4,6 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Navigation;
 using Windows.Graphics;
 using Windows.UI.ViewManagement;
@@ -72,7 +71,7 @@ public sealed partial class MainWindow : Window
         systemUi.ColorValuesChanged += OnSystemColorsChanged;
         Closed += (_, _) => { closed = true; responsivenessTrace?.Dispose(); systemUi.ColorValuesChanged -= OnSystemColorsChanged; CloseSearchPresentation(); CloseQueuePresentation(); CloseOverviewScrollbars(); CloseLibraryPresentation(); };
         Activated += (_, _) => ApplyTheme();
-        ContentFrame.Navigate(typeof(ShellPage), new ShellNavigationRequest("首页", this), new EntranceNavigationTransitionInfo());
+        NavigateShell(new ShellNavigationRequest("首页", this));
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -163,19 +162,14 @@ public sealed partial class MainWindow : Window
         if (!ready || changingSelection) return;
         string? page = args.IsSettingsSelected ? "设置" : (args.SelectedItem as NavigationViewItem)?.Tag as string;
         if (page is null || (ContentFrame.Content as ShellPage)?.PageKey == page) return;
-        bool createTransition = page == "创作" || (ContentFrame.Content as ShellPage)?.PageKey == "创作";
-        // Create already animates the sidebar width. Avoid layering a page fade
-        // and slide over that transition, which exposed the light card background.
-        NavigationTransitionInfo transition = createTransition
-            ? new SuppressNavigationTransitionInfo() : new EntranceNavigationTransitionInfo();
-        ContentFrame.Navigate(typeof(ShellPage), new ShellNavigationRequest(page, this), transition);
+        NavigateShell(new ShellNavigationRequest(page, this), fromSidebar: true);
     }
 
     private void OnBack(object sender, RoutedEventArgs e)
-    { if (ContentFrame.CanGoBack) ContentFrame.GoBack(new SlideNavigationTransitionInfo { Effect = SlideNavigationTransitionEffect.FromLeft }); }
+    { GoShellBack(); }
 
     private void OnForward(object sender, RoutedEventArgs e)
-    { if (ContentFrame.CanGoForward) ContentFrame.GoForward(); }
+    { GoShellForward(); }
 
     private void OnFrameNavigated(object sender, NavigationEventArgs e)
     {

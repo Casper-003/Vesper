@@ -8,7 +8,6 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Navigation;
 using Microsoft.UI.Windowing;
 using Vesper.Core;
@@ -216,7 +215,7 @@ public sealed partial class MainWindow
     {
         if (row.Song is null) return;
         SetQueueOpen(false);
-        ContentFrame.Navigate(typeof(ShellPage), new ShellNavigationRequest("歌曲详情:" + row.Song.Song.Id, this, row.Song.Song.Id), new EntranceNavigationTransitionInfo());
+        NavigateShell(new ShellNavigationRequest("歌曲详情:" + row.Song.Song.Id, this, row.Song.Song.Id));
     }
     private void OnQueueRemove(object sender, RoutedEventArgs args) { if (sender is FrameworkElement { DataContext: QueueSongItem row }) RemoveQueued(row); }
     private void RemoveQueued(QueueSongItem row)

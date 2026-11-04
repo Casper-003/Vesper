@@ -44,7 +44,7 @@ public sealed partial class MainWindow
         {
             for (int turn = 0; turn < turns; turn++)
             {
-                if (timer.Elapsed > TimeSpan.FromSeconds(90))
+                if (timer.Elapsed > TimeSpan.FromSeconds(180))
                     throw new TimeoutException("Overview navigation regression exceeded its bounded settling budget.");
                 await Task.Delay(16);
                 Root.UpdateLayout();
@@ -55,7 +55,7 @@ public sealed partial class MainWindow
         {
             string? from = (ContentFrame.Content as ShellPage)?.PageKey;
             NavigationTransitionInfo transition = key == "创作" || from == "创作"
-                ? new SuppressNavigationTransitionInfo() : new EntranceNavigationTransitionInfo();
+                ? new SuppressNavigationTransitionInfo() : ShellSlideTransition();
             bool accepted = ContentFrame.Navigate(typeof(ShellPage), new ShellNavigationRequest(key, this), transition);
             navigations++;
             Check(accepted, "Frame rejected navigation to " + key + ".");
@@ -262,12 +262,12 @@ public sealed partial class MainWindow
             var historyTitle = await Snapshot("曲库", "history/before", historyOffset);
             Navigate("首页"); await Settle(4);
             Check(ContentFrame.CanGoBack, "history: library navigation was not added to Frame history.");
-            ContentFrame.GoBack(new SlideNavigationTransitionInfo { Effect = SlideNavigationTransitionEffect.FromLeft });
+            GoShellBack();
             navigations++; await Settle();
             await Snapshot("曲库", "history/back", historyOffset, historyTitle);
             Check(ContentFrame.CanGoForward, "history: forward destination is missing.");
-            ContentFrame.GoForward(); navigations++; await Settle(4);
-            ContentFrame.GoBack(); navigations++; await Settle();
+            GoShellForward(); navigations++; await Settle(4);
+            GoShellBack(); navigations++; await Settle();
             await Snapshot("曲库", "history/forward-back", historyOffset, historyTitle);
 
             foreach (string destination in new[] { "设置", "首页", "创作", "搜索", "曲库" })

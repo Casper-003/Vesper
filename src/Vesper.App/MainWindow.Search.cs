@@ -1,7 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Animation;
 using Vesper.Core;
 
 namespace Vesper.App;
@@ -142,7 +141,7 @@ public sealed partial class MainWindow
     {
         if ((ContentFrame.Content as ShellPage)?.PageKey == "搜索") return;
         publishingSearch = true;
-        try { ContentFrame.Navigate(typeof(ShellPage), new ShellNavigationRequest("搜索", this), new EntranceNavigationTransitionInfo()); }
+        try { NavigateShell(new ShellNavigationRequest("搜索", this)); }
         finally { publishingSearch = false; }
     }
 
@@ -195,7 +194,7 @@ public sealed partial class MainWindow
     {
         if (viewModel.FindSong(songId) is null) return;
         SearchResults.CapturePosition();
-        ContentFrame.Navigate(typeof(ShellPage), new ShellNavigationRequest("歌曲详情:" + songId, this, songId), new EntranceNavigationTransitionInfo());
+        NavigateShell(new ShellNavigationRequest("歌曲详情:" + songId, this, songId));
     }
     internal async Task QueueSearchVersionAsync(VersionHit version)
     {
