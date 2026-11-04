@@ -56,23 +56,23 @@
             MaxWidth="1120" HorizontalAlignment="Stretch" Visibility="Collapsed">
           <TextBlock Text="相关专辑" FontSize="20" FontWeight="SemiBold"/>
           <ItemsControl x:Name="RelatedAlbums">
-            <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapGrid Orientation="Horizontal" ItemWidth="216" ItemHeight="88"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+            <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapGrid Orientation="Horizontal" ItemWidth="292" ItemHeight="128"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="local:EntityAlbumCard">
-                <Button Click="OnAlbumClick" Width="208" Height="80" Padding="8" Margin="0,0,8,8"
-                    HorizontalContentAlignment="Stretch" Style="{StaticResource SubtleButtonStyle}"
+                <Button Click="OnAlbumClick" MaxWidth="280" Height="120" Padding="8" Margin="0,0,8,8"
+                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Style="{StaticResource SubtleButtonStyle}"
                     AutomationProperties.Name="{x:Bind AccessibilityName, Mode=OneWay}" ToolTipService.ToolTip="{x:Bind Name, Mode=OneWay}">
                   <Grid ColumnSpacing="12">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="56"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                    <Border Width="56" Height="56" CornerRadius="4" Background="{ThemeResource ControlFillColorSecondaryBrush}">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="96"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <Border Width="96" Height="96" CornerRadius="4" Background="{ThemeResource ControlFillColorSecondaryBrush}">
                       <Grid>
-                        <FontIcon Glyph="&#xE93C;" FontSize="24" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                        <FontIcon Glyph="&#xE93C;" FontSize="40" Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                             Visibility="{x:Bind PlaceholderVisibility, Mode=OneWay}"/>
                         <Image Source="{Binding Cover}" Stretch="UniformToFill" Visibility="{x:Bind CoverVisibility, Mode=OneWay}"/>
                       </Grid>
                     </Border>
                     <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center">
-                      <TextBlock Text="{x:Bind Name, Mode=OneWay}" TextTrimming="CharacterEllipsis"/>
+                      <TextBlock Text="{x:Bind Name, Mode=OneWay}" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis"/>
                       <TextBlock Text="{x:Bind Artist, Mode=OneWay}" Visibility="{x:Bind ArtistVisibility, Mode=OneWay}"
                           FontSize="12" TextTrimming="CharacterEllipsis" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                     </StackPanel>
@@ -86,7 +86,7 @@
     </ListView>
     <Grid x:Name="EntityHeroLayer" Height="260" VerticalAlignment="Top" IsHitTestVisible="False">
       <Grid Background="{StaticResource EntityAccentBrush}"><Border Background="#33000000"/></Grid>
-      <Border x:Name="EntityCoverFrame" Width="140" Height="140" Margin="32,60,0,0"
+      <Border x:Name="EntityCoverFrame" Width="240" Height="240" Margin="32,24,0,0"
           HorizontalAlignment="Left" VerticalAlignment="Top" CornerRadius="4"
           Background="{ThemeResource ControlFillColorSecondaryBrush}">
         <Grid>
@@ -96,11 +96,11 @@
         </Grid>
       </Border>
       <Canvas x:Name="EntityTitleMotion" Margin="196,0,0,0">
-        <TextBlock x:Name="EntityHeroTitle" Canvas.Left="0" FontSize="96" LineHeight="116"
-            FontWeight="Bold" Foreground="White"/>
+        <TextBlock x:Name="EntityHeroTitle" Canvas.Left="0" FontSize="56" LineHeight="68"
+            FontWeight="Bold" Foreground="White" TextTrimming="CharacterEllipsis"/>
       </Canvas>
-      <TextBlock x:Name="EntitySubtitle" Margin="196,0,32,12" FontSize="14" Foreground="White"
-          VerticalAlignment="Bottom" TextTrimming="CharacterEllipsis" Visibility="Collapsed"/>
+      <TextBlock x:Name="EntitySubtitle" Margin="196,0,32,0" FontSize="14" Foreground="White"
+          VerticalAlignment="Top" TextTrimming="CharacterEllipsis" Visibility="Collapsed"/>
     </Grid>
     <Grid x:Name="EntityScrollRail" Width="16" HorizontalAlignment="Right" Background="Transparent" Visibility="Collapsed">
       <primitives:ScrollBar x:Name="EntityScrollBar" Margin="1,0" Orientation="Vertical"

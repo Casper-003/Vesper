@@ -82,6 +82,8 @@ public sealed partial class EntityDetailsView : UserControl
     internal Grid ScrollRail => EntityScrollRail;
     internal Canvas TitleMotionHost => EntityTitleMotion;
     internal TextBlock HeroTitle => EntityHeroTitle;
+    internal FrameworkElement HeroArtwork => EntityCoverFrame;
+    internal FrameworkElement HeroSubtitle => EntitySubtitle;
     internal ScrollBar ScrollBarPart => EntityScrollBar;
     internal bool IsAlbum => isAlbum;
     internal bool HasSubtitle => EntitySubtitle.Visibility == Visibility.Visible;
@@ -96,6 +98,8 @@ public sealed partial class EntityDetailsView : UserControl
         EntityCoverFrame.CornerRadius = new CornerRadius(isAlbum ? 4 : 36);
         EntitySongs.ItemsSource = rows;
         RelatedAlbums.ItemsSource = albums;
+        RelatedAlbums.Loaded += (_, _) => ResizeRelatedAlbumCards();
+        RelatedAlbums.SizeChanged += (_, _) => ResizeRelatedAlbumCards();
         AddHandler(PointerPressedEvent, new PointerEventHandler(OnInteractionPointerPressed), true);
         AddHandler(PointerReleasedEvent, new PointerEventHandler(OnInteractionPointerReleased), true);
         AddHandler(PointerCanceledEvent, new PointerEventHandler(OnInteractionPointerReleased), true);
@@ -299,14 +303,37 @@ public sealed partial class EntityDetailsView : UserControl
     internal void RefreshHeaderMetrics(double heroHeight)
     {
         EntityHeaderSpace.Height = Math.Max(0, heroHeight - 48 + 16);
-        double artworkSize = Math.Clamp(heroHeight * .55, 56, 140);
+        double width = Math.Max(1, EntityPage.ActualWidth);
+        double padding = Math.Clamp(width * .045, 24, 96);
+        double gap = Math.Clamp(width * .03, 20, 64);
+        // The image leads the expanded header. Reserve a readable text column
+        // when the browser is narrowed by either sidebar.
+        double artworkSize = Math.Max(64, Math.Min(Math.Clamp(heroHeight * .70, 112, 352),
+            Math.Max(64, (width - padding * 2 - gap) * .46)));
+        artworkSize = Math.Min(artworkSize, Math.Max(48, heroHeight - 24));
         EntityCoverFrame.Width = EntityCoverFrame.Height = artworkSize;
         EntityCoverFrame.CornerRadius = new CornerRadius(isAlbum ? 4 : artworkSize / 2);
-        EntityCoverFrame.Margin = new Thickness(32, Math.Max(52, (heroHeight - artworkSize) / 2), 0, 0);
-        EntityCoverPlaceholder.FontSize = Math.Clamp(artworkSize * .4, 24, 44);
-        double textLeft = 32 + artworkSize + 24;
+        EntityCoverFrame.Margin = new Thickness(padding, Math.Max(0, (heroHeight - artworkSize) / 2), 0, 0);
+        EntityCoverFrame.CenterPoint = new((float)(artworkSize / 2), (float)(artworkSize / 2), 0);
+        EntityCoverPlaceholder.FontSize = Math.Clamp(artworkSize * .32, 28, 88);
+        double textLeft = padding + artworkSize + gap;
         EntityTitleMotion.Margin = new Thickness(textLeft, 0, 0, 0);
-        EntitySubtitle.Margin = new Thickness(textLeft, 0, 32, 12);
+        EntitySubtitle.MaxWidth = Math.Max(1, width - textLeft - padding);
+        ResizeRelatedAlbumCards();
+    }
+
+    private void ResizeRelatedAlbumCards()
+    {
+        if (RelatedAlbums.ItemsPanelRoot is WrapGrid panel && RelatedAlbums.ActualWidth > 0)
+            panel.ItemWidth = Math.Max(1, Math.Min(292, RelatedAlbums.ActualWidth));
+    }
+
+    internal double RefreshTextMetrics(double heroHeight, double titleHeight)
+    {
+        double groupHeight = titleHeight + (HasSubtitle ? 28 : 0);
+        double titleTop = Math.Max(12, (heroHeight - groupHeight) / 2);
+        EntitySubtitle.Margin = new Thickness(EntityTitleMotion.Margin.Left, titleTop + titleHeight + 8, 24, 0);
+        return titleTop;
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)

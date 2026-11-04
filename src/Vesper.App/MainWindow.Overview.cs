@@ -162,9 +162,10 @@ public sealed partial class MainWindow
         if (existing is not null)
         {
             existing.Metrics.InsertScalar("TitleLeftShift", (float)(entity is null ? 0 : Math.Max(0, titleMotion.Margin.Left - 32)));
-            existing.Metrics.InsertScalar("TitleBottomGap", entity?.HasSubtitle == true ? 40 : 16);
             if (existing.TitleText != title.Text)
             {
+                double maximum = title.MaxWidth;
+                title.MaxWidth = double.PositiveInfinity;
                 title.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
                 existing = existing with
                 {
@@ -172,10 +173,11 @@ public sealed partial class MainWindow
                     TitleHeightPerFontUnit = title.DesiredSize.Height / title.FontSize,
                     TitleLineHeightPerFontUnit = title.LineHeight / title.FontSize
                 };
+                title.MaxWidth = maximum;
                 existing.TitleText = title.Text;
                 overviewMotions[list] = existing;
             }
-            UpdateOverviewTitleLayout(existing, title, page.ActualWidth - titleMotion.Margin.Left - 32, height);
+            UpdateOverviewTitleLayout(existing, title, page.ActualWidth - titleMotion.Margin.Left - 32, height, entity);
             SyncOverviewBackground(list);
             return;
         }
@@ -184,7 +186,6 @@ public sealed partial class MainWindow
         var properties = ElementCompositionPreview.GetScrollViewerManipulationPropertySet(scroll);
         var metrics = compositor.CreatePropertySet();
         metrics.InsertScalar("TitleLeftShift", (float)(entity is null ? 0 : Math.Max(0, titleMotion.Margin.Left - 32)));
-        metrics.InsertScalar("TitleBottomGap", entity?.HasSubtitle == true ? 40 : 16);
         // Measure the typeface proportions once. Background changes set the native
         // text size; only scrolling scales that correctly sized text down.
         title.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
@@ -193,7 +194,7 @@ public sealed partial class MainWindow
             title.LineHeight / title.FontSize);
         motion.TitleText = title.Text;
         overviewMotions[list] = motion;
-        UpdateOverviewTitleLayout(motion, title, page.ActualWidth - titleMotion.Margin.Left - 32, height);
+        UpdateOverviewTitleLayout(motion, title, page.ActualWidth - titleMotion.Margin.Left - 32, height, entity);
         scroll.ViewChanged += OnOverviewViewChanged;
         const string progress = "Clamp(-scroll.Translation.Y / (metrics.Height - 48), 0, 1)";
         ExpressionAnimation Expression(string formula)
@@ -207,13 +208,29 @@ public sealed partial class MainWindow
         visual.Clip = clip;
         clip.StartAnimation("BottomInset", Expression($"({progress}) * (metrics.Height - 48)"));
         // Animate the shared title host through XAML facade properties, avoiding layout-owned offsets/scales.
-        var translation = Expression($"Vector3(-metrics.TitleLeftShift * ({progress}), (metrics.Height - metrics.TitleHeight - metrics.TitleBottomGap) * (1 - ({progress})) + 9 * ({progress}), 0)");
+        var translation = Expression($"Vector3(-metrics.TitleLeftShift * ({progress}), metrics.ExpandedTitleY * (1 - ({progress})) + 9 * ({progress}), 0)");
         translation.Target = "Translation";
         titleMotion.StartAnimation(translation);
         string visibleScale = $"metrics.ExpandedTitleScale * (1 - ({progress})) + metrics.CompactTitleScale * ({progress})";
         var scale = Expression($"Vector3({visibleScale}, {visibleScale}, 1)");
         scale.Target = "Scale";
         titleMotion.StartAnimation(scale);
+        if (entity is not null)
+        {
+            void Animate(UIElement target, string property, string formula)
+            {
+                var animation = Expression(formula);
+                animation.Target = property;
+                target.StartAnimation(animation);
+            }
+            // Shrink around the artwork's center and keep it inside the same
+            // shrinking header as the title, rather than clipping off a full-size image.
+            Animate(entity.HeroArtwork, "Scale", $"Vector3(1 - ({progress}), 1 - ({progress}), 1)");
+            Animate(entity.HeroArtwork, "Translation", $"Vector3(metrics.ArtworkShiftX * ({progress}), metrics.ArtworkShiftY * ({progress}), 0)");
+            Animate(entity.HeroArtwork, "Opacity", $"1 - Clamp((({progress}) - 0.35) / 0.65, 0, 1)");
+            Animate(entity.HeroSubtitle, "Translation", $"Vector3(-metrics.TitleLeftShift * ({progress}), metrics.SubtitleShiftY * ({progress}), 0)");
+            Animate(entity.HeroSubtitle, "Opacity", $"1 - ({progress})");
+        }
         if (library)
         {
             ElementCompositionPreview.SetIsTranslationEnabled(LibraryActions, true);
@@ -223,12 +240,20 @@ public sealed partial class MainWindow
         SyncOverviewBackground(list);
     }
 
-    private static void UpdateOverviewTitleLayout(OverviewMotion motion, TextBlock title, double availableWidth, float height)
+    private static void UpdateOverviewTitleLayout(OverviewMotion motion, TextBlock title, double availableWidth, float height,
+        EntityDetailsView? entity = null)
     {
         // Render native glyphs at the fitted size instead of enlarging a small cached
         // glyph layout. An unchanged fit does not invalidate text layout again.
         double fitFontSize = Math.Max(1, Math.Min(height * .46 / Math.Max(.01, motion.TitleHeightPerFontUnit),
             Math.Max(1, availableWidth - 2) / Math.Max(.01, motion.TitleWidthPerFontUnit)));
+        if (entity is not null)
+        {
+            fitFontSize = Math.Max(18, Math.Min(Math.Clamp(height * .14, 26, 72),
+                Math.Max(1, availableWidth - 2) / Math.Max(.01, motion.TitleWidthPerFontUnit)));
+            title.MaxWidth = Math.Max(1, availableWidth);
+            ToolTipService.SetToolTip(title, title.Text);
+        }
         if (Math.Abs(title.FontSize - fitFontSize) > .01)
         {
             title.FontSize = fitFontSize;
@@ -245,6 +270,17 @@ public sealed partial class MainWindow
             motion.Metrics.InsertScalar("TitleHeight", (float)(title.FontSize * motion.TitleHeightPerFontUnit));
             motion.Metrics.InsertScalar("ExpandedTitleScale", 1);
             motion.Metrics.InsertScalar("CompactTitleScale", (float)Math.Min(1, 24 / title.FontSize));
+        }
+        double titleHeight = title.FontSize * motion.TitleHeightPerFontUnit;
+        double expandedY = entity?.RefreshTextMetrics(height, titleHeight) ?? height - titleHeight - 16;
+        motion.Metrics.InsertScalar("ExpandedTitleY", (float)expandedY);
+        if (entity is not null)
+        {
+            var artwork = entity.HeroArtwork;
+            motion.Metrics.InsertScalar("ArtworkShiftX", (float)(32 - artwork.Margin.Left - artwork.Width / 2));
+            motion.Metrics.InsertScalar("ArtworkShiftY", (float)(24 - artwork.Margin.Top - artwork.Height / 2));
+            double compactTitleHeight = titleHeight * Math.Min(1, 24 / title.FontSize);
+            motion.Metrics.InsertScalar("SubtitleShiftY", (float)(9 + compactTitleHeight - entity.HeroSubtitle.Margin.Top));
         }
     }
 

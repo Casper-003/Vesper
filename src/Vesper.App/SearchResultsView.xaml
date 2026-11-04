@@ -21,16 +21,16 @@
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
             <Grid x:Name="ArtistCard" ColumnSpacing="12" Padding="8" Visibility="Collapsed">
-              <Grid.ColumnDefinitions><ColumnDefinition Width="64"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-              <Border Width="64" Height="64" CornerRadius="32" Background="{ThemeResource ControlAltFillColorSecondaryBrush}"><FontIcon Glyph="&#xE716;" FontSize="26"/></Border>
-              <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4"><TextBlock Text="艺人" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12"/><TextBlock x:Name="ArtistName" TextTrimming="CharacterEllipsis" FontSize="16"/></StackPanel>
-              <Button x:Name="ArtistOpenButton" Grid.ColumnSpan="2" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Click="OnArtistClick" Style="{StaticResource SubtleButtonStyle}" AutomationProperties.Name="查看艺人" ToolTipService.ToolTip="查看艺人"/>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="112"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <Border Width="112" Height="112" CornerRadius="56" Background="{ThemeResource ControlAltFillColorSecondaryBrush}"><FontIcon Glyph="&#xE716;" FontSize="44"/></Border>
+              <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4"><TextBlock Text="艺人" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12"/><TextBlock x:Name="ArtistName" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" FontSize="16" ToolTipService.ToolTip="{Binding Text, ElementName=ArtistName}"/></StackPanel>
+              <Button x:Name="ArtistOpenButton" Grid.ColumnSpan="2" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Click="OnArtistClick" Style="{StaticResource SubtleButtonStyle}" AutomationProperties.Name="查看艺人" ToolTipService.ToolTip="{Binding Text, ElementName=ArtistName}"/>
             </Grid>
             <Grid x:Name="AlbumCard" Grid.Column="1" ColumnSpacing="12" Padding="8" Visibility="Collapsed">
-              <Grid.ColumnDefinitions><ColumnDefinition Width="64"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-              <Border Width="64" Height="64" CornerRadius="4" Background="{ThemeResource ControlAltFillColorSecondaryBrush}"><FontIcon Glyph="&#xE93C;" FontSize="26"/></Border>
-              <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4"><TextBlock Text="专辑" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12"/><TextBlock x:Name="AlbumName" TextTrimming="CharacterEllipsis" FontSize="16"/><TextBlock x:Name="AlbumArtist" TextTrimming="CharacterEllipsis" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12"/></StackPanel>
-              <Button x:Name="AlbumOpenButton" Grid.ColumnSpan="2" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Click="OnAlbumClick" Style="{StaticResource SubtleButtonStyle}" AutomationProperties.Name="查看专辑" ToolTipService.ToolTip="查看专辑"/>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="112"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <Border Width="112" Height="112" CornerRadius="4" Background="{ThemeResource ControlAltFillColorSecondaryBrush}"><FontIcon Glyph="&#xE93C;" FontSize="44"/></Border>
+              <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4"><TextBlock Text="专辑" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12"/><TextBlock x:Name="AlbumName" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" FontSize="16" ToolTipService.ToolTip="{Binding Text, ElementName=AlbumName}"/><TextBlock x:Name="AlbumArtist" TextTrimming="CharacterEllipsis" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12" ToolTipService.ToolTip="{Binding Text, ElementName=AlbumArtist}"/></StackPanel>
+              <Button x:Name="AlbumOpenButton" Grid.ColumnSpan="2" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Click="OnAlbumClick" Style="{StaticResource SubtleButtonStyle}" AutomationProperties.Name="查看专辑" ToolTipService.ToolTip="{Binding Text, ElementName=AlbumName}"/>
             </Grid>
           </Grid>
           <TextBlock x:Name="SongHeading" Text="歌曲" FontSize="18" Visibility="Collapsed"/>
