@@ -22,6 +22,8 @@ public sealed record SongDetails(SongMetadata? Local = null, SongMetadata? Onlin
 {
     public string LocalReadKey { get; init; } = "";
     public string LocalResolution { get; init; } = "";
+    public SongAssetState? Assets { get; init; }
+    public SongVideoLookupState? VideoLookup { get; init; }
     public SongMetadata Effective(string fallbackTitle)
     {
         var local = Local ?? new();
@@ -70,6 +72,10 @@ public sealed record SongDetails(SongMetadata? Local = null, SongMetadata? Onlin
         var credits = (creditSource?.ArtistCredits ?? []).Where(credit => !string.IsNullOrWhiteSpace(credit.Name)).ToList();
         if (!artistEdited && Same(result.Artist, online.Artist))
         {
+            foreach (var credit in online.ArtistCredits.Where(credit => credit.Role != "performer"))
+                if (!credits.Any(old => Same(old.Name, credit.Name) && old.Role == credit.Role
+                    && !(old.ExternalIds ?? []).Any(prior => (credit.ExternalIds ?? []).Any(next =>
+                        prior.Provider == next.Provider && prior.Kind == next.Kind && prior.Value != next.Value)))) credits.Add(credit);
             for (int i = 0; i < credits.Count; i++)
             {
                 var credit = credits[i];

@@ -8,7 +8,6 @@ public sealed partial class MainWindow
 {
     private readonly Dictionary<ListView, EntityDetailsView> entityOverviews = [];
     private readonly Dictionary<EntityDetailsView, (string Id, bool Album)> entityIdentities = [];
-    private readonly HashSet<string> entityArtworkRequests = [];
     private readonly DispatcherTimer entityRefreshTimer = new() { Interval = TimeSpan.FromMilliseconds(200) };
     private void InitializeEntityDetailsPresentation() => entityRefreshTimer.Tick += (_, _) =>
     {
@@ -79,16 +78,16 @@ public sealed partial class MainWindow
         {
             var album = catalog.Albums.FirstOrDefault(value => value.Id == id);
             if (album is null) { view.Apply("专辑", "", null, [], []); return; }
-            var tracks = catalog.GetAlbumTracks(id).Where(track => Visible(viewModel.FindSong(track.SongId))).ToArray();
-            bool multiDisc = tracks.Select(track => track.DiscNumber).Where(number => number.HasValue).Distinct().Count() > 1
-                || tracks.Any(track => track.DiscNumber > 1);
-            var rows = tracks.Select(track => new EntitySongRow(viewModel.FindSong(track.SongId)!,
-                track.TrackNumber is > 0 ? multiDisc ? $"{(track.DiscNumber is > 0 ? track.DiscNumber.ToString() : "?")}-{track.TrackNumber:00}"
-                    : $"{track.TrackNumber:00}" : "")).ToArray();
-            object? cover = tracks.Select(track => viewModel.FindSong(track.SongId)?.Cover).FirstOrDefault(value => value is not null);
+            var albumTracks = catalog.GetAlbumTracks(id);
+            var tracks = albumTracks.Where(track => Visible(viewModel.FindSong(track.SongId)))
+                .OrderBy(track => track.DiscNumber is > 0 ? track.DiscNumber.Value : int.MaxValue)
+                .ThenBy(track => track.TrackNumber is > 0 ? track.TrackNumber.Value : int.MaxValue)
+                .ThenBy(track => viewModel.FindSong(track.SongId)?.Title, StringComparer.CurrentCultureIgnoreCase)
+                .ThenBy(track => track.Id, StringComparer.Ordinal).ToArray();
+            var rows = tracks.Select(track => new EntitySongRow(viewModel.FindSong(track.SongId)!, "",
+                discNumber: track.DiscNumber, trackNumber: track.TrackNumber)).ToArray();
+            object? cover = GetAlbumImage(album, albumTracks);
             view.Apply(album.Name, string.Join(" · ", new[] { album.Artist, album.Year }.Where(value => value.Length > 0)), cover, rows, []);
-            RequestEntityArtwork(tracks.Select(track => viewModel.FindSong(track.SongId)).OfType<LibrarySongItem>()
-                .OrderByDescending(song => song.Cover is not null).ThenByDescending(song => song.CoverUrl.Length > 0).Take(1));
         }
         else
         {
@@ -100,28 +99,10 @@ public sealed partial class MainWindow
             var albums = catalog.GetArtistAlbums(id).Where(album => tracksByAlbum[album.Id].Any(track => Visible(viewModel.FindSong(track.SongId))))
                 .OrderBy(album => album.Name, StringComparer.CurrentCultureIgnoreCase).ThenBy(album => album.Id, StringComparer.Ordinal)
                 .Select(album => new EntityAlbumCard(album.Id, album.Name, album.Artist,
-                    tracksByAlbum[album.Id].Select(track => viewModel.FindSong(track.SongId)?.Cover).FirstOrDefault(value => value is not null))).ToArray();
-            // Album artwork is not an artist portrait. Unknown artist images remain neutral.
-            view.Apply(artist?.Name ?? "艺人", "", null, rows, albums);
-            RequestEntityArtwork(albums.Select(album => tracksByAlbum[album.Id].Select(track => viewModel.FindSong(track.SongId))
-                .OfType<LibrarySongItem>().Where(Visible).OrderByDescending(song => song.Cover is not null)
-                .ThenByDescending(song => song.CoverUrl.Length > 0).FirstOrDefault()).OfType<LibrarySongItem>());
+                    GetAlbumImage(album, tracksByAlbum[album.Id].ToArray()))).ToArray();
+            view.Apply(artist?.Name ?? "艺人", "", artist is null ? null : GetArtistImage(artist), rows, albums);
         }
         if (view.IsLoaded) ConfigureOverview(view.SongList);
     }
 
-    private void RequestEntityArtwork(IEnumerable<LibrarySongItem> songs)
-    {
-        foreach (var song in songs)
-        {
-            if (song.Cover is not null) continue;
-            string identity = song.Song.Id + "\n" + song.CoverUrl;
-            if (entityArtworkRequests.Add(identity)) _ = LoadEntityArtworkAsync(song);
-        }
-    }
-    private async Task LoadEntityArtworkAsync(LibrarySongItem song)
-    {
-        await LoadCoverAsync(song);
-        if (!closed && song.Cover is not null) RequestEntityRefresh();
-    }
 }

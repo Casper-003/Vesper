@@ -29,7 +29,7 @@ public sealed class LrcLibClient(HttpClient client)
             using var request = new HttpRequestMessage(HttpMethod.Get,
                 "https://lrclib.net/api/search?track_name=" + Uri.EscapeDataString(title));
             request.Headers.UserAgent.ParseAdd("Vesper/0.1 (+https://github.com/Casper-003/Vesper)");
-            using var response = await client.SendAsync(request, token);
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
             if (response.StatusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.ServiceUnavailable)
             {
                 var after = response.Headers.RetryAfter;
@@ -37,7 +37,7 @@ public sealed class LrcLibClient(HttpClient client)
                 retryAfter = until.AddMilliseconds(Random.Shared.Next(100, 500));
             }
             response.EnsureSuccessStatusCode();
-            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token));
+            using var json = await ArtistProfileClient.ReadJsonAsync(response, token).ConfigureAwait(false);
             if (json.RootElement.ValueKind != JsonValueKind.Array) throw new InvalidDataException("歌词响应格式无效。");
             var results = new List<LyricsCandidate>();
             foreach (var entry in json.RootElement.EnumerateArray())

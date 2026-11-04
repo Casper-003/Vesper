@@ -233,7 +233,7 @@ public sealed class LibraryCatalog
     public IReadOnlyList<CatalogTrack> GetAlbumTracks(string albumId)
     {
         lock (gate) return Tracks.Where(track => track.AlbumId == albumId)
-            .OrderBy(track => track.TrackNumber.HasValue ? 0 : 1).ThenBy(track => track.DiscNumber ?? 1)
+            .OrderBy(track => track.DiscNumber is > 0 ? track.DiscNumber.Value : int.MaxValue)
             .ThenBy(track => track.TrackNumber ?? int.MaxValue).ThenBy(track => Key(track.Title), StringComparer.Ordinal)
             .ThenBy(track => track.SongId, StringComparer.Ordinal).ThenBy(track => track.Id, StringComparer.Ordinal).ToArray();
     }

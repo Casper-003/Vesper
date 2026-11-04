@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Text.Json;
 
 namespace Vesper.Core;
@@ -10,6 +9,8 @@ public sealed partial class AdditionalSongSources(HttpClient http, MusicBrainzCl
     private sealed record CachedEntries(List<Entry> Rows, DateTimeOffset ExpiresAt);
     private sealed class CachedSearch(Func<Task<CachedEntries>> load)
     {
+        internal CachedEntries? Completed;
+        internal long LastAccess;
         internal readonly Lazy<Task<CachedEntries>> Work = new(() =>
         {
             var task = load();
@@ -20,7 +21,10 @@ public sealed partial class AdditionalSongSources(HttpClient http, MusicBrainzCl
             return task;
         }, LazyThreadSafetyMode.ExecutionAndPublication);
     }
-    private readonly ConcurrentDictionary<string, CachedSearch> searches = new();
+    private readonly object searchCacheGate = new();
+    private readonly Dictionary<string, CachedSearch> searches = new(StringComparer.Ordinal);
+    private long searchCacheAccess;
+    private const int SearchCacheCapacity = 64;
     private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
     private static readonly TimeSpan searchCacheLifetime = TimeSpan.FromMinutes(15);
     private async Task<JsonDocument> GetAsync(string url, CancellationToken token)
@@ -30,9 +34,9 @@ public sealed partial class AdditionalSongSources(HttpClient http, MusicBrainzCl
         request.Headers.UserAgent.ParseAdd("Mozilla/5.0 Vesper/0.1");
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
         timeout.CancelAfter(TimeSpan.FromSeconds(8));
-        using var response = await http.SendAsync(request, timeout.Token);
+        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
-        return JsonDocument.Parse(await response.Content.ReadAsStringAsync(timeout.Token));
+        return await ArtistProfileClient.ReadJsonAsync(response, timeout.Token).ConfigureAwait(false);
     }
     private async Task<List<Entry>> SearchNetease(string title, CancellationToken token)
     {
@@ -61,7 +65,14 @@ public sealed partial class AdditionalSongSources(HttpClient http, MusicBrainzCl
         while (true)
         {
             token.ThrowIfCancellationRequested();
-            var search = searches.GetOrAdd(title, CreateSearch);
+            CachedSearch search;
+            lock (searchCacheGate)
+            {
+                PruneSearchesLocked(clock.GetUtcNow());
+                if (!searches.TryGetValue(title, out search!))
+                    searches[title] = search = CreateSearch(title);
+                search.LastAccess = ++searchCacheAccess;
+            }
             // Each waiter owns only its wait. The shared request has GetAsync's
             // bounded timeout and is not cancelled by an unrelated caller.
             var cached = await search.Work.Value.WaitAsync(token);
@@ -79,7 +90,16 @@ public sealed partial class AdditionalSongSources(HttpClient http, MusicBrainzCl
             try
             {
                 var rows = await SearchNetease(title, CancellationToken.None);
-                return new CachedEntries(rows, clock.GetUtcNow() + searchCacheLifetime);
+                var cached = new CachedEntries(rows, clock.GetUtcNow() + searchCacheLifetime);
+                lock (searchCacheGate)
+                {
+                    // Record completion before publishing the task result so even
+                    // a request with no remaining waiters obeys the memory bound.
+                    search!.Completed = cached;
+                    search.LastAccess = ++searchCacheAccess;
+                    PruneSearchesLocked(clock.GetUtcNow());
+                }
+                return cached;
             }
             catch
             {
@@ -92,8 +112,22 @@ public sealed partial class AdditionalSongSources(HttpClient http, MusicBrainzCl
         return search;
     }
 
-    private void RemoveSearch(string title, CachedSearch search) =>
-        ((ICollection<KeyValuePair<string, CachedSearch>>)searches).Remove(new(title, search));
+    private void RemoveSearch(string title, CachedSearch search)
+    {
+        lock (searchCacheGate)
+            if (searches.TryGetValue(title, out var current) && ReferenceEquals(current, search)) searches.Remove(title);
+    }
+
+    private void PruneSearchesLocked(DateTimeOffset now)
+    {
+        foreach (string title in searches.Where(pair => pair.Value.Completed is { } cached && cached.ExpiresAt <= now)
+            .Select(pair => pair.Key).ToArray()) searches.Remove(title);
+        // Active shared requests are never evicted: another waiter must join the
+        // same bounded request instead of duplicating network work or its rows.
+        var completed = searches.Where(pair => pair.Value.Completed is not null).ToArray();
+        foreach (var entry in completed.OrderBy(pair => pair.Value.LastAccess).Take(Math.Max(0, completed.Length - SearchCacheCapacity)))
+            searches.Remove(entry.Key);
+    }
 
     private static async Task<IReadOnlyList<T>> Combine<T>(CancellationToken token, params Func<Task<IReadOnlyList<T>>>[] sources)
     {
@@ -119,7 +153,8 @@ public sealed partial class AdditionalSongSources(HttpClient http, MusicBrainzCl
         token.ThrowIfCancellationRequested();
         return match.RecordingId.StartsWith("deezer:")
         ? Task.FromResult(new SongMetadata(match.Title, match.Artist, match.Album,
-            SourceUrl: "https://www.deezer.com/track/" + match.RecordingId[7..], CoverUrl: match.CoverUrl))
+            SourceUrl: "https://www.deezer.com/track/" + match.RecordingId[7..], CoverUrl: match.CoverUrl)
+            { ArtistCredits = match.ArtistCredits })
         : match.RecordingId.StartsWith("netease:")
         ? Task.FromResult(new SongMetadata(match.Title, match.Artist, match.Album, Year: match.Year,
             SourceUrl: "https://music.163.com/song?id=" + match.RecordingId[8..], CoverUrl: match.CoverUrl))

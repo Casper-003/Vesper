@@ -18,6 +18,7 @@ public sealed class LibraryState
     public Dictionary<string, DateTimeOffset> FavoriteAddedAt { get; set; } = [];
     public Dictionary<string, SongDetails> Details { get; set; } = [];
     public LibraryCatalog Catalog { get; set; } = new();
+    public Dictionary<string, CachedArtistProfile> ArtistProfiles { get; set; } = [];
     public List<QueueEntry> PendingQueue { get; set; } = [];
     public QueueEntry? CurrentQueueSong { get; set; }
     public Dictionary<string, FileScanCache> ScanCache { get; set; } = new(StringComparer.OrdinalIgnoreCase);
@@ -34,15 +35,16 @@ public sealed class LibraryStore(string path)
             ?? throw new InvalidDataException("曲库记录为空，请先备份并检查本机曲库文件。");
     }
 
-    public async Task SaveAsync(LibraryState state)
+    public async Task SaveAsync(LibraryState state, bool reconcileCatalog = true)
     {
-        state.Catalog.Reconcile(state);
+        if (reconcileCatalog) state.Catalog.Reconcile(state);
         var snapshot = new LibraryState
         {
             Directories = [.. state.Directories], Songs = [.. state.Songs], Favorites = [.. state.Favorites],
             FavoriteAddedAt = new(state.FavoriteAddedAt),
             Details = new(state.Details),
             Catalog = state.Catalog.Snapshot(),
+            ArtistProfiles = new(state.ArtistProfiles),
             PendingQueue = [.. state.PendingQueue], CurrentQueueSong = state.CurrentQueueSong,
             ScanCache = new(state.ScanCache, StringComparer.OrdinalIgnoreCase)
         };
@@ -51,8 +53,12 @@ public sealed class LibraryStore(string path)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
             string temporary = path + ".tmp";
-            string json = await Task.Run(() => JsonSerializer.Serialize(snapshot, new JsonSerializerOptions { WriteIndented = true }));
-            await File.WriteAllTextAsync(temporary, json);
+            await Task.Run(async () =>
+            {
+                await using var output = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None,
+                    16384, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                await JsonSerializer.SerializeAsync(output, snapshot, new JsonSerializerOptions { WriteIndented = true });
+            });
             File.Move(temporary, path, overwrite: true);
         }
         finally { saveLock.Release(); }

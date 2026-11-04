@@ -23,8 +23,10 @@ internal static class AdditionalSourceChecks
         using var thirdHttp = new HttpClient(thirdHandler);
         var third = new AdditionalSongSources(thirdHttp, new(thirdHttp), new(thirdHttp));
         var thirdMetadata = await third.SearchMetadata("测试曲目", default);
-        check((await third.GetMetadata(thirdMetadata.Single(), default)).SourceUrl.Contains("deezer.com"),
-            "前两个资料源失败时第三个资料源仍可提供可追溯的曲目信息");
+        var thirdDetails = await third.GetMetadata(thirdMetadata.Single(), default);
+        check(thirdDetails.SourceUrl.Contains("deezer.com")
+            && thirdDetails.ArtistCredits.Single().ExternalIds!.Single() == new MusicExternalId("deezer", "artist", "42"),
+            "第三资料源保留精确艺人身份供图片同步，不丢失曲目来源");
         var thirdLyrics = await third.SearchLyrics("测试曲目", default);
         check(LrcLibClient.ToLyrics(thirdLyrics.Single(), 200, "测试曲目.mp3").PlainText == "合成测试文本"
             && thirdLyrics.Single().SourceUrl.Contains("kugou.com"), "第三歌词源可独立检索与解码，不依赖前两个来源成功");
@@ -44,7 +46,7 @@ internal static class AdditionalSourceChecks
                 if (Third) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
                 body = """{"result":{"songs":[{"id":42,"name":"测试曲目","ar":[{"name":"测试艺人"}],"al":{"id":7,"name":"测试专辑","picUrl":"http://p2.music.126.net/test.jpg"},"dt":200000,"publishTime":1577836800000}]},"code":200}""";
             }
-            else if (Third && request.RequestUri.Host == "api.deezer.com") body = """{"data":[{"id":1,"title":"测试曲目","artist":{"name":"测试艺人"},"album":{"id":1,"title":"测试专辑","cover_xl":"https://cdn-images.dzcdn.net/test.jpg"}}]}""";
+            else if (Third && request.RequestUri.Host == "api.deezer.com") body = """{"data":[{"id":1,"title":"测试曲目","artist":{"id":42,"name":"测试艺人"},"album":{"id":1,"title":"测试专辑","cover_xl":"https://cdn-images.dzcdn.net/test.jpg"}}]}""";
             else if (Third && request.RequestUri.Host == "lyrics.kugou.com") body = request.RequestUri.AbsolutePath.Contains("download")
                 ? "{\"content\":\"" + Convert.ToBase64String(Encoding.UTF8.GetBytes("[00:01.00]合成测试文本")) + "\"}"
                 : """{"candidates":[{"id":"9","song":"测试曲目","singer":"测试艺人","duration":200000,"accesskey":"synthetic"}]}""";

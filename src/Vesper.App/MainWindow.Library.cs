@@ -70,7 +70,10 @@ public sealed partial class MainWindow
 
     private void CloseLibraryPresentation()
     {
+        CancelPagePreparation();
+        libraryPrepared.TrySetCanceled();
         CloseLibraryEnrichment();
+        CloseListArtwork();
         libraryFeedbackTimer.Stop();
         activityRefreshTimer.Stop();
         overviewIdleTimer.Stop();
@@ -179,11 +182,13 @@ public sealed partial class MainWindow
 
     private void OnSongRowLoaded(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement row) { PrepareLoadedSongRow(row); QueueVisibleRowMetadata(row); }
+        if (sender is FrameworkElement row)
+        { ObserveSongRowArtwork(row); PrepareLoadedSongRow(row); QueueVisibleRowMetadata(row); }
     }
 
     private void OnSongRowContextChanged(FrameworkElement sender, DataContextChangedEventArgs args)
     {
+        ObserveSongRowArtwork(sender);
         if (args.NewValue is LibrarySongItem) QueueVisibleRowMetadata(sender);
     }
 

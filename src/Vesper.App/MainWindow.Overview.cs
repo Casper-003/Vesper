@@ -64,13 +64,14 @@ public sealed partial class MainWindow
         if (closed) return;
         OnOverviewScrollbarIdle();
         viewModel.SetPresentationScrolling(false);
+        QueueCurrentVisibleArtwork();
         if (pendingMetadataRows.Count > 0) metadataRowsTimer.Start();
     }
     private void QueueVisibleRowMetadata(FrameworkElement row)
     {
         if (Environment.GetEnvironmentVariable("VESPER_RUNTIME_CHECK_PATH") is { Length: > 0 }) return;
         var song = row.DataContext as LibrarySongItem;
-        if (song is null || song.MetadataLoaded || song.MetadataRetryAfter > DateTimeOffset.UtcNow) return;
+        if (song is null || song.MetadataLoaded && song.ListCover is not null) return;
         if (closed) return;
         pendingMetadataRows.Add(row);
         if (!overviewScrolling && !metadataRowsTimer.IsEnabled) metadataRowsTimer.Start();
@@ -82,7 +83,7 @@ public sealed partial class MainWindow
         var rows = pendingMetadataRows.ToArray();
         pendingMetadataRows.Clear();
         foreach (var row in rows)
-            if (row.IsLoaded && row.DataContext is LibrarySongItem song && IsSongVisible(song)) _ = LoadSongMetadataAsync(song, visibleOnly: true);
+            if (row.IsLoaded && row.DataContext is LibrarySongItem song && IsSongVisible(song)) _ = LoadVisibleRowPresentationAsync(song);
     }
     private bool IsSongVisible(LibrarySongItem song)
     {
@@ -324,13 +325,15 @@ public sealed partial class MainWindow
             ?? (args.ItemContainer.ContentTemplateRoot is { } root ? FindChild<SongRowSurface>(root) : null);
         if (surface is not null)
         {
-            if (args.InRecycleQueue) surface.SetHovered(false);
+            if (args.InRecycleQueue) { surface.SetHovered(false); ForgetSongRowArtwork(surface); }
             else
             {
                 // Compiled templates may reuse their binding root without updating inherited DataContext.
                 // Keep command handlers and the cover Image's binding on the current song as well.
                 object item = args.Item is EntitySongRow row ? row.Song : args.Item;
                 if (!ReferenceEquals(surface.DataContext, item)) surface.DataContext = item;
+                ObserveSongRowArtwork(surface);
+                QueueVisibleRowMetadata(surface);
                 PaintSongRow(surface, args.ItemIndex);
             }
         }
@@ -385,6 +388,7 @@ public sealed partial class MainWindow
     }
     private void ApplyOverviewTheme(bool dark)
     {
+        ApplyHeroColors(dark);
         ((SolidColorBrush)Root.Resources["OverviewEvenBrush"]).Color = dark ? Windows.UI.Color.FromArgb(255, 43, 43, 43) : Windows.UI.Color.FromArgb(255, 250, 250, 250);
         ((SolidColorBrush)Root.Resources["OverviewOddBrush"]).Color = dark ? Windows.UI.Color.FromArgb(255, 34, 34, 34) : Windows.UI.Color.FromArgb(255, 239, 239, 239);
         ((SolidColorBrush)Root.Resources["OverviewEvenHoverBrush"]).Color = dark ? Windows.UI.Color.FromArgb(255, 56, 56, 56) : Windows.UI.Color.FromArgb(255, 255, 255, 255);

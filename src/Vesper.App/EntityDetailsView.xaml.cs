@@ -7,25 +7,35 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Vesper.Core;
 using Windows.System;
 
 namespace Vesper.App;
 
 // The shared song object owns favorite, cover, availability and metadata changes.
-// This wrapper adds only the album membership's display number and template.
-public sealed class EntitySongRow(LibrarySongItem song, string number) : INotifyPropertyChanged
+// This wrapper adds the release membership's real position and its virtualized presentation.
+public sealed class EntitySongRow(LibrarySongItem song, string number, int? discNumber = null, int? trackNumber = null) : INotifyPropertyChanged
 {
     public event PropertyChangedEventHandler? PropertyChanged;
     public LibrarySongItem Song { get; private set; } = song;
     public string Number { get; private set; } = number;
+    public int? DiscNumber { get; private set; } = discNumber is > 0 ? discNumber : null;
+    public int? TrackNumber { get; private set; } = trackNumber is > 0 ? trackNumber : null;
+    public string DiscHeading { get; private set; } = "";
+    public Visibility DiscHeadingVisibility => DiscHeading.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
     public DataTemplate? SongTemplate { get; private set; }
     public Visibility NumberVisibility => Number.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
     internal string Key { get; set; } = song.Song.Id;
 
-    internal void Update(LibrarySongItem value, string number, DataTemplate template)
+    internal void Update(LibrarySongItem value, string number, int? discNumber, int? trackNumber,
+        string discHeading, DataTemplate template)
     {
         if (!ReferenceEquals(Song, value)) { Song = value; Notify(nameof(Song)); }
         if (Number != number) { Number = number; Notify(nameof(Number)); Notify(nameof(NumberVisibility)); }
+        if (DiscNumber != discNumber) { DiscNumber = discNumber; Notify(nameof(DiscNumber)); }
+        if (TrackNumber != trackNumber) { TrackNumber = trackNumber; Notify(nameof(TrackNumber)); }
+        if (DiscHeading != discHeading)
+        { DiscHeading = discHeading; Notify(nameof(DiscHeading)); Notify(nameof(DiscHeadingVisibility)); }
         if (!ReferenceEquals(SongTemplate, template)) { SongTemplate = template; Notify(nameof(SongTemplate)); }
     }
 
@@ -87,6 +97,21 @@ public sealed partial class EntityDetailsView : UserControl
     internal ScrollBar ScrollBarPart => EntityScrollBar;
     internal bool IsAlbum => isAlbum;
     internal bool HasSubtitle => EntitySubtitle.Visibility == Visibility.Visible;
+    internal LinearGradientBrush HeroBackground => (LinearGradientBrush)Resources["EntityHeroBrush"];
+    internal uint? ArtworkColor { get; private set; }
+    private HeroPaletteColors? heroPalette;
+    internal void ApplyHeroPalette(bool dark, uint? artworkColor)
+    {
+        ArtworkColor = artworkColor;
+        var palette = HeroPalette.Create(dark, artworkColor);
+        if (heroPalette == palette) return;
+        heroPalette = palette;
+        HeroBackground.GradientStops[0].Color = MainWindow.HeroColor(palette.Top);
+        HeroBackground.GradientStops[1].Color = MainWindow.HeroColor(palette.Middle);
+        HeroBackground.GradientStops[2].Color = MainWindow.HeroColor(palette.Bottom);
+        EntityHeroTitle.Foreground = new SolidColorBrush(MainWindow.HeroColor(palette.Foreground));
+        EntitySubtitle.Foreground = new SolidColorBrush(MainWindow.HeroColor(palette.SecondaryForeground));
+    }
     internal bool IsInteracting => activePointers.Count > 0 || activeKeys.Count > 0;
 
     public EntityDetailsView(MainWindow host, bool isAlbum)
@@ -94,6 +119,7 @@ public sealed partial class EntityDetailsView : UserControl
         this.host = host;
         this.isAlbum = isAlbum;
         InitializeComponent();
+        host.UpdateEntityHeroColors(this, null);
         EntityCoverPlaceholder.Glyph = isAlbum ? "\uE93C" : "\uE716";
         EntityCoverFrame.CornerRadius = new CornerRadius(isAlbum ? 4 : 36);
         EntitySongs.ItemsSource = rows;
@@ -137,8 +163,14 @@ public sealed partial class EntityDetailsView : UserControl
     private void ApplyDetails(string title, string subtitle, object? cover, IReadOnlyList<EntitySongRow> songs,
         IReadOnlyList<EntityAlbumCard> relatedAlbums)
     {
+        IReadOnlyList<AlbumTrackLabel> trackLabels = isAlbum
+            ? AlbumTrackLayout.Build(songs.Select(song => new AlbumTrackPosition(song.DiscNumber, song.TrackNumber)).ToArray()) : [];
+        string RowNumber(int index) => !isAlbum ? "" : songs[index].TrackNumber is > 0 ? trackLabels[index].Number
+            : songs[index].Number.Length > 0 ? songs[index].Number : "—";
         bool layoutChanged = EntityHeroTitle.Text != title || EntitySubtitle.Text != subtitle
             || !rows.Select(row => row.Song.Song.Id).SequenceEqual(songs.Select(row => row.Song.Song.Id))
+            || isAlbum && !rows.Select(row => (row.Number, row.DiscHeading)).SequenceEqual(
+                songs.Select((_, index) => (RowNumber(index), trackLabels[index].DiscHeading)))
             || !albums.Select(album => album.Id).SequenceEqual(isAlbum ? Enumerable.Empty<string>() : relatedAlbums.Select(album => album.Id).Distinct());
         // Cover/favorite/availability notifications should keep the existing
         // viewport untouched instead of repeatedly scrolling an anchor into view.
@@ -152,6 +184,7 @@ public sealed partial class EntityDetailsView : UserControl
         EntitySubtitle.Visibility = subtitle.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         ToolTipService.SetToolTip(EntitySubtitle, subtitle);
         EntityCover.Source = cover as ImageSource;
+        host.UpdateEntityHeroColors(this, cover);
         EntityCover.Visibility = cover is null ? Visibility.Collapsed : Visibility.Visible;
         EntityCoverPlaceholder.Visibility = cover is null ? Visibility.Visible : Visibility.Collapsed;
 
@@ -160,14 +193,16 @@ public sealed partial class EntityDetailsView : UserControl
         var occurrences = new Dictionary<string, int>(StringComparer.Ordinal);
         var previousRows = rows.ToDictionary(row => row.Key, StringComparer.Ordinal);
         var orderedRows = new List<EntitySongRow>(songs.Count);
-        foreach (var desired in songs)
+        for (int index = 0; index < songs.Count; index++)
         {
+            var desired = songs[index];
             string songId = desired.Song.Song.Id;
             int occurrence = occurrences.GetValueOrDefault(songId);
             occurrences[songId] = occurrence + 1;
             string key = songId + ":" + occurrence;
             var row = previousRows.GetValueOrDefault(key) ?? new EntitySongRow(desired.Song, desired.Number) { Key = key };
-            row.Update(desired.Song, isAlbum ? desired.Number : "", host.EntitySongTemplate);
+            row.Update(desired.Song, RowNumber(index), desired.DiscNumber, desired.TrackNumber,
+                isAlbum ? trackLabels[index].DiscHeading : "", host.EntitySongTemplate);
             orderedRows.Add(row);
         }
         Reconcile(rows, orderedRows);
@@ -183,7 +218,8 @@ public sealed partial class EntityDetailsView : UserControl
             }
         Reconcile(albums, orderedAlbums);
         RelatedAlbumsSection.Visibility = albums.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        EntitySongHeading.Visibility = rows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        EntitySongHeading.Visibility = rows.Count > 0 && !isAlbum ? Visibility.Visible : Visibility.Collapsed;
+        AlbumColumnHeader.Visibility = rows.Count > 0 && isAlbum ? Visibility.Visible : Visibility.Collapsed;
         EntityEmptyState.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         restorePending |= layoutChanged && hasPosition;
         if (IsLoaded)
@@ -267,6 +303,8 @@ public sealed partial class EntityDetailsView : UserControl
         QueuePendingDetails();
     }
 
+    private void OnDiscHeadingPointer(object sender, PointerRoutedEventArgs args) => args.Handled = true;
+
     private void OnInteractionKeyDown(object sender, KeyRoutedEventArgs args)
     {
         if (args.Key is not (VirtualKey.Enter or VirtualKey.Space)) return;
@@ -328,9 +366,11 @@ public sealed partial class EntityDetailsView : UserControl
 
     internal double RefreshTextMetrics(double heroHeight, double titleHeight)
     {
-        double groupHeight = titleHeight + (HasSubtitle ? 28 : 0);
+        const double subtitleGap = 16;
+        double groupHeight = titleHeight + (HasSubtitle ? subtitleGap + 20 : 0);
         double titleTop = Math.Max(12, (heroHeight - groupHeight) / 2);
-        EntitySubtitle.Margin = new Thickness(EntityTitleMotion.Margin.Left, titleTop + titleHeight + 8, 24, 0);
+        EntitySubtitle.Margin = new Thickness(EntityTitleMotion.Margin.Left + Canvas.GetLeft(EntityHeroTitle),
+            titleTop + titleHeight + subtitleGap, 24, 0);
         return titleTop;
     }
 

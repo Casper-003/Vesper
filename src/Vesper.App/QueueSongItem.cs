@@ -15,7 +15,7 @@ public sealed class QueueSongItem : INotifyPropertyChanged, IDisposable
     public string Number => IsPending ? Position.ToString() : "♪";
     public string Title => Song?.Title ?? Entry.Title;
     public string Artist => Song?.Artist ?? "未知艺人";
-    public object? Cover => Song?.Cover;
+    public object? Cover => Song?.ListCover;
     public bool HasCover => Cover is not null;
     public bool HasNoCover => !HasCover;
     public bool IsAvailable { get; private set; }
