@@ -73,7 +73,7 @@ public sealed partial class EntityDetailsView : UserControl
     private long interactionGeneration;
 
     private sealed record PendingDetails(string Title, string Subtitle, object? Cover,
-        EntitySongRow[] Songs, EntityAlbumCard[] Albums, string Note);
+        EntitySongRow[] Songs, EntityAlbumCard[] Albums);
 
     internal ListView SongList => EntitySongs;
     internal Grid PageGrid => EntityPage;
@@ -121,23 +121,23 @@ public sealed partial class EntityDetailsView : UserControl
     }
 
     public void Apply(string title, string subtitle, object? cover, IReadOnlyList<EntitySongRow> songs,
-        IReadOnlyList<EntityAlbumCard> relatedAlbums, string note)
+        IReadOnlyList<EntityAlbumCard> relatedAlbums)
     {
         if (IsInteracting)
         {
             // Keep the latest complete membership snapshot. A background index
             // update cannot move a pressed row underneath the pending click.
-            pendingDetails = new(title, subtitle, cover, songs.ToArray(), relatedAlbums.ToArray(), note);
+            pendingDetails = new(title, subtitle, cover, songs.ToArray(), relatedAlbums.ToArray());
             return;
         }
         pendingDetails = null;
-        ApplyDetails(title, subtitle, cover, songs, relatedAlbums, note);
+        ApplyDetails(title, subtitle, cover, songs, relatedAlbums);
     }
 
     private void ApplyDetails(string title, string subtitle, object? cover, IReadOnlyList<EntitySongRow> songs,
-        IReadOnlyList<EntityAlbumCard> relatedAlbums, string note)
+        IReadOnlyList<EntityAlbumCard> relatedAlbums)
     {
-        bool layoutChanged = EntityHeroTitle.Text != title || EntitySubtitle.Text != subtitle || TrackOrderNote.Text != note
+        bool layoutChanged = EntityHeroTitle.Text != title || EntitySubtitle.Text != subtitle
             || !rows.Select(row => row.Song.Song.Id).SequenceEqual(songs.Select(row => row.Song.Song.Id))
             || !albums.Select(album => album.Id).SequenceEqual(isAlbum ? Enumerable.Empty<string>() : relatedAlbums.Select(album => album.Id).Distinct());
         // Cover/favorite/availability notifications should keep the existing
@@ -154,8 +154,6 @@ public sealed partial class EntityDetailsView : UserControl
         EntityCover.Source = cover as ImageSource;
         EntityCover.Visibility = cover is null ? Visibility.Collapsed : Visibility.Visible;
         EntityCoverPlaceholder.Visibility = cover is null ? Visibility.Visible : Visibility.Collapsed;
-        TrackOrderNote.Text = note;
-        TrackOrderNote.Visibility = note.Length > 0 && songs.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
 
         // Reconcile by song and occurrence, allowing the same recording to occupy
         // distinct positions while retaining existing row objects and bindings.
@@ -296,7 +294,7 @@ public sealed partial class EntityDetailsView : UserControl
             interactionFlushQueued = false;
             if (!IsLoaded || IsInteracting || pendingDetails is not { } details) return;
             pendingDetails = null;
-            ApplyDetails(details.Title, details.Subtitle, details.Cover, details.Songs, details.Albums, details.Note);
+            ApplyDetails(details.Title, details.Subtitle, details.Cover, details.Songs, details.Albums);
         });
     }
 

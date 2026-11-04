@@ -28,8 +28,6 @@
       <ListView.Header>
         <StackPanel MaxWidth="1120" HorizontalAlignment="Stretch">
           <Grid x:Name="EntityHeaderSpace" Height="280"/>
-          <TextBlock x:Name="TrackOrderNote" Margin="8,0,8,16" FontSize="12" TextWrapping="Wrap"
-              Visibility="Collapsed" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
           <TextBlock x:Name="EntitySongHeading" Text="歌曲" FontSize="20" FontWeight="SemiBold" Margin="8,0,8,12"/>
           <StackPanel x:Name="EntityEmptyState" Margin="8,16,8,28" Spacing="8" Visibility="Collapsed">
             <FontIcon Glyph="&#xE8D6;" FontSize="36" HorizontalAlignment="Left"
@@ -97,7 +95,7 @@
       </Border>
       <Canvas x:Name="EntityTitleMotion" Margin="196,0,0,0">
         <TextBlock x:Name="EntityHeroTitle" Canvas.Left="0" FontSize="56" LineHeight="68"
-            FontWeight="Bold" Foreground="White" TextTrimming="CharacterEllipsis"/>
+            FontWeight="Bold" Foreground="White" TextWrapping="Wrap" MaxLines="3" TextTrimming="CharacterEllipsis"/>
       </Canvas>
       <TextBlock x:Name="EntitySubtitle" Margin="196,0,32,0" FontSize="14" Foreground="White"
           VerticalAlignment="Top" TextTrimming="CharacterEllipsis" Visibility="Collapsed"/>

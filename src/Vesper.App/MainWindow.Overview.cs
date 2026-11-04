@@ -164,16 +164,16 @@ public sealed partial class MainWindow
             existing.Metrics.InsertScalar("TitleLeftShift", (float)(entity is null ? 0 : Math.Max(0, titleMotion.Margin.Left - 32)));
             if (existing.TitleText != title.Text)
             {
-                double maximum = title.MaxWidth;
-                title.MaxWidth = double.PositiveInfinity;
-                title.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
-                existing = existing with
+                if (entity is null)
                 {
-                    TitleWidthPerFontUnit = title.DesiredSize.Width / title.FontSize,
-                    TitleHeightPerFontUnit = title.DesiredSize.Height / title.FontSize,
-                    TitleLineHeightPerFontUnit = title.LineHeight / title.FontSize
-                };
-                title.MaxWidth = maximum;
+                    title.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+                    existing = existing with
+                    {
+                        TitleWidthPerFontUnit = title.DesiredSize.Width / title.FontSize,
+                        TitleHeightPerFontUnit = title.DesiredSize.Height / title.FontSize,
+                        TitleLineHeightPerFontUnit = title.LineHeight / title.FontSize
+                    };
+                }
                 existing.TitleText = title.Text;
                 overviewMotions[list] = existing;
             }
@@ -217,6 +217,12 @@ public sealed partial class MainWindow
         titleMotion.StartAnimation(scale);
         if (entity is not null)
         {
+            // This is the same title throughout the transition. Crop only its
+            // extra lines as it collapses; never crossfade two layers of text.
+            var titleVisual = ElementCompositionPreview.GetElementVisual(title);
+            var titleClip = compositor.CreateInsetClip();
+            titleVisual.Clip = titleClip;
+            titleClip.StartAnimation("BottomInset", Expression($"Max(0, metrics.TitleHeight - metrics.TitleLineHeight) * ({progress})"));
             void Animate(UIElement target, string property, string formula)
             {
                 var animation = Expression(formula);
@@ -249,8 +255,10 @@ public sealed partial class MainWindow
             Math.Max(1, availableWidth - 2) / Math.Max(.01, motion.TitleWidthPerFontUnit)));
         if (entity is not null)
         {
-            fitFontSize = Math.Max(18, Math.Min(Math.Clamp(height * .14, 26, 72),
-                Math.Max(1, availableWidth - 2) / Math.Max(.01, motion.TitleWidthPerFontUnit)));
+            // Width constrains layout, not the font size: long names wrap into
+            // the text column instead of becoming an ever-smaller single line.
+            fitFontSize = Math.Clamp(height * .14, 26, 72);
+            title.Width = Math.Max(1, availableWidth);
             title.MaxWidth = Math.Max(1, availableWidth);
             ToolTipService.SetToolTip(title, title.Text);
         }
@@ -272,6 +280,16 @@ public sealed partial class MainWindow
             motion.Metrics.InsertScalar("CompactTitleScale", (float)Math.Min(1, 24 / title.FontSize));
         }
         double titleHeight = title.FontSize * motion.TitleHeightPerFontUnit;
+        double lineHeight = Math.Max(title.LineHeight, titleHeight);
+        if (entity is not null)
+        {
+            double heightBudget = Math.Max(lineHeight, height - (entity.HasSubtitle ? 52 : 24));
+            title.MaxLines = Math.Clamp((int)Math.Floor(heightBudget / lineHeight), 1, 3);
+            title.Measure(new Windows.Foundation.Size(title.Width, double.PositiveInfinity));
+            titleHeight = Math.Max(lineHeight, title.DesiredSize.Height);
+            motion.Metrics.InsertScalar("TitleHeight", (float)titleHeight);
+            motion.Metrics.InsertScalar("TitleLineHeight", (float)lineHeight);
+        }
         double expandedY = entity?.RefreshTextMetrics(height, titleHeight) ?? height - titleHeight - 16;
         motion.Metrics.InsertScalar("ExpandedTitleY", (float)expandedY);
         if (entity is not null)
@@ -279,7 +297,7 @@ public sealed partial class MainWindow
             var artwork = entity.HeroArtwork;
             motion.Metrics.InsertScalar("ArtworkShiftX", (float)(32 - artwork.Margin.Left - artwork.Width / 2));
             motion.Metrics.InsertScalar("ArtworkShiftY", (float)(24 - artwork.Margin.Top - artwork.Height / 2));
-            double compactTitleHeight = titleHeight * Math.Min(1, 24 / title.FontSize);
+            double compactTitleHeight = lineHeight * Math.Min(1, 24 / title.FontSize);
             motion.Metrics.InsertScalar("SubtitleShiftY", (float)(9 + compactTitleHeight - entity.HeroSubtitle.Margin.Top));
         }
     }

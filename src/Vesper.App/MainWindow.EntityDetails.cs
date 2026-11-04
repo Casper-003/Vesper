@@ -81,18 +81,15 @@ public sealed partial class MainWindow
         if (isAlbum)
         {
             var album = catalog.Albums.FirstOrDefault(value => value.Id == id);
-            if (album is null) { view.Apply("专辑", "", null, [], [], "暂无本地收录歌曲"); return; }
+            if (album is null) { view.Apply("专辑", "", null, [], []); return; }
             var tracks = catalog.GetAlbumTracks(id).Where(track => Visible(viewModel.FindSong(track.SongId))).ToArray();
             bool multiDisc = tracks.Select(track => track.DiscNumber).Where(number => number.HasValue).Distinct().Count() > 1
                 || tracks.Any(track => track.DiscNumber > 1);
             var rows = tracks.Select(track => new EntitySongRow(viewModel.FindSong(track.SongId)!,
                 track.TrackNumber is > 0 ? multiDisc ? $"{(track.DiscNumber is > 0 ? track.DiscNumber.ToString() : "?")}-{track.TrackNumber:00}"
                     : $"{track.TrackNumber:00}" : "")).ToArray();
-            string note = rows.Length == 0 ? "暂无本地收录歌曲"
-                : tracks.All(track => track.TrackNumber is null) ? "暂无曲序，按歌名排列"
-                : tracks.Any(track => track.TrackNumber is null) ? "未标注曲序的歌曲列于末尾" : "";
             object? cover = tracks.Select(track => viewModel.FindSong(track.SongId)?.Cover).FirstOrDefault(value => value is not null);
-            view.Apply(album.Name, string.Join(" · ", new[] { album.Artist, album.Year }.Where(value => value.Length > 0)), cover, rows, [], note);
+            view.Apply(album.Name, string.Join(" · ", new[] { album.Artist, album.Year }.Where(value => value.Length > 0)), cover, rows, []);
             RequestEntityArtwork(tracks.Select(track => viewModel.FindSong(track.SongId)).OfType<LibrarySongItem>()
                 .OrderByDescending(song => song.Cover is not null).ThenByDescending(song => song.CoverUrl.Length > 0).Take(1));
         }
@@ -108,7 +105,7 @@ public sealed partial class MainWindow
                 .Select(album => new EntityAlbumCard(album.Id, album.Name, album.Artist,
                     tracksByAlbum[album.Id].Select(track => viewModel.FindSong(track.SongId)?.Cover).FirstOrDefault(value => value is not null))).ToArray();
             // Album artwork is not an artist portrait. Unknown artist images remain neutral.
-            view.Apply(artist?.Name ?? "艺人", "", null, rows, albums, rows.Length == 0 ? "暂无本地收录歌曲" : "");
+            view.Apply(artist?.Name ?? "艺人", "", null, rows, albums);
             RequestEntityArtwork(albums.Select(album => tracksByAlbum[album.Id].Select(track => viewModel.FindSong(track.SongId))
                 .OfType<LibrarySongItem>().Where(Visible).OrderByDescending(song => song.Cover is not null)
                 .ThenByDescending(song => song.CoverUrl.Length > 0).FirstOrDefault()).OfType<LibrarySongItem>());
