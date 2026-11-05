@@ -58,7 +58,11 @@ internal sealed class PreviewTransport : UserControl
             "stop" => "M3,3 L21,3 L21,21 L3,21 Z",
             _ => "M5,2 L22,12 L5,22 Z"
         };
-        return (PathIcon)XamlReader.Load($"<PathIcon xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' Width='18' Height='18' Data='{data}'/>");
+        var icon = (PathIcon)XamlReader.Load($"<PathIcon xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' Width='18' Height='18' Data='{data}'/>");
+        // PathIcon clips to its display box; Width/Height do not scale the
+        // geometry's 24-unit coordinate system automatically.
+        icon.Data.Transform = new ScaleTransform { ScaleX = .75, ScaleY = .75 };
+        return icon;
     }
     private static Button FilledButton(string kind, string label)
     {

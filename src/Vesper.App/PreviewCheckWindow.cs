@@ -5,6 +5,9 @@ using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Automation.Provider;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
+using Windows.Storage.Streams;
+using Windows.Graphics.Imaging;
 using Windows.Media.Playback;
 
 namespace Vesper.App;
@@ -39,6 +42,43 @@ internal sealed class PreviewCheckWindow : Window
             while (!condition()) { if (Environment.TickCount64 - start > 15000) throw new TimeoutException(); await Task.Delay(30); }
         }
         static void Invoke(Button button) => ((IInvokeProvider)new ButtonAutomationPeer(button).GetPattern(PatternInterface.Invoke)).Invoke();
+        async Task<(int MinX, int MaxX, int MinY, int MaxY, int RightPixels, bool ArrowTip)> CaptureIcon(Button button, string name)
+        {
+            root.UpdateLayout();
+            var bitmap = new RenderTargetBitmap();
+            await bitmap.RenderAsync((UIElement)button.Content, 180, 180);
+            var buffer = await bitmap.GetPixelsAsync();
+            byte[] pixels = new byte[buffer.Length];
+            using (var reader = DataReader.FromBuffer(buffer)) reader.ReadBytes(pixels);
+            int width = bitmap.PixelWidth, height = bitmap.PixelHeight;
+            int minX = width, maxX = -1, minY = height, maxY = -1;
+            bool tip = false;
+            for (int y = 0; y < height; y++) for (int x = 0; x < width; x++)
+            {
+                if (pixels[(y * width + x) * 4 + 3] < 128) continue;
+                minX = Math.Min(minX, x); maxX = Math.Max(maxX, x); minY = Math.Min(minY, y); maxY = Math.Max(maxY, y);
+                if (x >= width * .85 && y < height * .5) tip = true;
+            }
+            int rightPixels = 0;
+            if (maxX >= 0) for (int y = 0; y < height; y++) if (pixels[(y * width + maxX) * 4 + 3] >= 128) rightPixels++;
+            // Store an enlarged native render on an opaque theme background for review.
+            byte background = root.RequestedTheme == ElementTheme.Light ? (byte)245 : (byte)24;
+            for (int i = 0; i < pixels.Length; i += 4)
+            {
+                double alpha = pixels[i + 3] / 255d;
+                for (int c = 0; c < 3; c++) pixels[i + c] = (byte)Math.Clamp(pixels[i + c] + background * (1 - alpha), 0, 255);
+                pixels[i + 3] = 255;
+            }
+            using var stream = new InMemoryRandomAccessStream();
+            var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, stream);
+            encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied, (uint)width, (uint)height, 96, 96, pixels);
+            await encoder.FlushAsync(); stream.Seek(0);
+            string directory = Path.GetDirectoryName(Path.GetFullPath(reportPath))!;
+            Directory.CreateDirectory(directory);
+            await using var output = File.Create(Path.Combine(directory, name + ".png"));
+            using var input = stream.AsStreamForRead(); await input.CopyToAsync(output);
+            return (minX, maxX, minY, maxY, rightPixels, tip);
+        }
         try
         {
             var gesture = new CapsuleGesture();
@@ -111,11 +151,21 @@ internal sealed class PreviewCheckWindow : Window
             Check(sliders == 1, "简易胶囊只有进度条，没有音量入口");
             root.RequestedTheme = ElementTheme.Light;
             await Until(() => capsule.Transport.ReturnButton.Content is IconElement { Foreground: SolidColorBrush b } && b.Color == Microsoft.UI.Colors.Black);
+            var arrow = await CaptureIcon(capsule.Transport.ReturnButton, "return-light");
+            Check(arrow.ArrowTip && arrow.MaxX > arrow.MinX, "原生像素包含返回箭头右上箭头尖端");
+            var play = await CaptureIcon(capsule.Transport.PauseButton, "play-light");
+            Check(play.MaxX > play.MinX && play.RightPixels < (play.MaxY - play.MinY) / 3, "原生播放三角有完整尖端而非截平");
+            var stop = await CaptureIcon(capsule.Transport.StopButton, "stop-light");
+            Check(Math.Abs((stop.MinX + stop.MaxX) / 2d - 89.5) < 2 && Math.Abs((stop.MinY + stop.MaxY) / 2d - 89.5) < 2,
+                "原生停止方块完整且在图标框居中");
             root.RequestedTheme = ElementTheme.Dark;
             await Until(() => capsule.Transport.ReturnButton.Content is IconElement { Foreground: SolidColorBrush b } && b.Color == Microsoft.UI.Colors.White);
             Check(capsule.Transport.StopButton.Content is PathIcon && capsule.Transport.StopButton.BorderThickness == new Thickness(0),
                 "深浅主题使用黑白实心图形，无圆圈边框");
             Invoke(capsule.Transport.PauseButton); await Until(() => session.Playback.State == MediaPlaybackState.Playing);
+            await Until(() => Equals(capsule.Transport.PauseButton.Tag, "pause"));
+            var paused = await CaptureIcon(capsule.Transport.PauseButton, "pause-dark");
+            Check(Math.Abs((paused.MinX + paused.MaxX) / 2d - 89.5) < 2, "暂停双竖条未单侧裁切且居中");
             Invoke(capsule.Transport.PauseButton); await Until(() => session.Playback.State == MediaPlaybackState.Paused);
             Check(true, "单次按钮调用即可继续或暂停预览");
             int returns = 0; capsule.ReturnToDetails += () => returns++;
