@@ -37,6 +37,14 @@ internal sealed class PreviewTransport : UserControl
         TintOpacity = .58,
         FallbackColor = theme == ElementTheme.Light ? Windows.UI.Color.FromArgb(255, 235, 235, 238) : Windows.UI.Color.FromArgb(255, 40, 40, 44)
     };
+    internal static AcrylicBrush FrostedPanel(ElementTheme theme) => new()
+    {
+        TintColor = theme == ElementTheme.Dark ? Windows.UI.Color.FromArgb(255, 32, 32, 36) : Windows.UI.Color.FromArgb(255, 248, 248, 250),
+        TintOpacity = .72,
+        TintLuminosityOpacity = .72,
+        AlwaysUseFallback = false,
+        FallbackColor = theme == ElementTheme.Dark ? Windows.UI.Color.FromArgb(255, 40, 40, 44) : Windows.UI.Color.FromArgb(255, 238, 238, 242)
+    };
     internal static Button Icon(string glyph, string label)
     {
         var button = new Button { Content = new FontIcon { Glyph = glyph, FontSize = 16 }, Width = 34, Height = 32, Padding = new Thickness(0), CornerRadius = new CornerRadius(16) };

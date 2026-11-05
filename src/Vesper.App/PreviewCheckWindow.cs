@@ -132,9 +132,16 @@ internal sealed class PreviewCheckWindow : Window
             await Until(() => !capsule.IsOpen);
             Check((session.Playback.Position - at).Duration().TotalMilliseconds < 80 && session.Playback.State == MediaPlaybackState.Paused,
                 "详情与胶囊表面往返保留暂停和进度");
-            capsule.Open(true); capsule.SwitchCard(120);
+            capsule.Open(true); await Until(() => !capsule.IsTransitioning); capsule.SwitchCard(120);
+            Check(!new Windows.UI.ViewManagement.UISettings().AnimationsEnabled || capsule.IsCardSwitching, "滚轮启动前后卡缩放位移过渡");
+            await Until(() => !capsule.IsTransitioning);
             Check(!capsule.ShowingPreview && session.Playback.State == MediaPlaybackState.Paused, "滚轮切到后卡不影响播放");
-            await Task.Delay(250); capsule.SwitchCard(-120); Check(capsule.ShowingPreview, "反向滚轮循环切回预览卡");
+            capsule.SwitchCard(-120); await Until(() => !capsule.IsTransitioning);
+            Check(capsule.ShowingPreview, "反向滚轮循环切回预览卡");
+            capsule.SwitchCard(120); capsule.Close();
+            await Until(() => !capsule.IsOpen && !capsule.IsTransitioning);
+            Check(session.Playback.State == MediaPlaybackState.Paused, "切卡中收起取消旧过渡且不改变暂停");
+            capsule.Open(true);
             await Until(() => !capsule.IsTransitioning);
             root.UpdateLayout();
             double x1 = capsule.Transport.ReturnButton.TransformToVisual(root).TransformPoint(default).X;
@@ -150,6 +157,7 @@ internal sealed class PreviewCheckWindow : Window
             CountSliders(capsule.Transport);
             Check(sliders == 1, "简易胶囊只有进度条，没有音量入口");
             root.RequestedTheme = ElementTheme.Light;
+            Check(capsule.PanelMaterial is AcrylicBrush { AlwaysUseFallback: false, TintOpacity: .72 }, "浅色展开层使用磨砂 Acrylic 材质");
             await Until(() => capsule.Transport.ReturnButton.Content is IconElement { Foreground: SolidColorBrush b } && b.Color == Microsoft.UI.Colors.Black);
             var arrow = await CaptureIcon(capsule.Transport.ReturnButton, "return-light");
             Check(arrow.ArrowTip && arrow.MaxX > arrow.MinX, "原生像素包含返回箭头右上箭头尖端");
@@ -159,6 +167,7 @@ internal sealed class PreviewCheckWindow : Window
             Check(Math.Abs((stop.MinX + stop.MaxX) / 2d - 89.5) < 2 && Math.Abs((stop.MinY + stop.MaxY) / 2d - 89.5) < 2,
                 "原生停止方块完整且在图标框居中");
             root.RequestedTheme = ElementTheme.Dark;
+            Check(capsule.PanelMaterial is AcrylicBrush { AlwaysUseFallback: false, TintOpacity: .72 }, "深色展开层使用磨砂 Acrylic 材质");
             await Until(() => capsule.Transport.ReturnButton.Content is IconElement { Foreground: SolidColorBrush b } && b.Color == Microsoft.UI.Colors.White);
             Check(capsule.Transport.StopButton.Content is PathIcon && capsule.Transport.StopButton.BorderThickness == new Thickness(0),
                 "深浅主题使用黑白实心图形，无圆圈边框");

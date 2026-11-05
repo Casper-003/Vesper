@@ -31,7 +31,6 @@ internal sealed class PlaybackCapsule : IDisposable
     private readonly nint hwnd;
     private readonly Action routeChanged;
     private readonly CapsuleGesture gesture = new();
-    private long wheelAt;
     private bool previewFront;
     private int wheelRemainder;
     private readonly DispatcherTimer marqueeTimer = new() { Interval = TimeSpan.FromMilliseconds(33) };
@@ -42,10 +41,15 @@ internal sealed class PlaybackCapsule : IDisposable
     private bool expanded;
     private Storyboard? morph, widthTransition;
     private readonly CompositeTransform morphTransform = new();
+    private readonly CompositeTransform switchTransform = new();
+    private Storyboard? cardSwitch;
+    private long cardRevision;
     public bool IsOpen => Overlay.Visibility == Visibility.Visible;
     internal double MarqueeOffset => marquee.HorizontalOffset;
     internal string Caption => title.Text;
-    internal bool IsTransitioning => morph is not null;
+    internal bool IsTransitioning => morph is not null || cardSwitch is not null;
+    internal bool IsCardSwitching => cardSwitch is not null;
+    internal Brush PanelMaterial => front.Background;
     internal Rect CardBounds => front.TransformToVisual(root).TransformBounds(new Rect(0, 0, front.ActualWidth, front.ActualHeight));
     public bool ShowingPreview => IsOpen && previewFront && session.SongId is not null;
     internal event Action? ReturnToDetails;
@@ -69,7 +73,8 @@ internal sealed class PlaybackCapsule : IDisposable
         back = new Border { Width = 396, Height = 140, Margin = new Thickness(0, 70, 0, 0), VerticalAlignment = VerticalAlignment.Top, HorizontalAlignment = HorizontalAlignment.Center, CornerRadius = new CornerRadius(18), IsHitTestVisible = false };
         front = new Border { Width = 420, MinHeight = 150, Margin = new Thickness(0, 54, 0, 0), Padding = new Thickness(14), VerticalAlignment = VerticalAlignment.Top, HorizontalAlignment = HorizontalAlignment.Center, CornerRadius = new CornerRadius(18), BorderThickness = new Thickness(1) };
         Overlay.Children.Add(back); Overlay.Children.Add(front);
-        front.RenderTransform = morphTransform;
+        var transforms = new TransformGroup(); transforms.Children.Add(switchTransform); transforms.Children.Add(morphTransform);
+        front.RenderTransform = transforms;
         front.RenderTransformOrigin = new Point(.5, 0);
         back.Child = rearLabel;
         front.SizeChanged += (_, _) => back.Height = front.ActualHeight;
@@ -135,7 +140,9 @@ internal sealed class PlaybackCapsule : IDisposable
         ElementTheme theme = root.RequestedTheme == ElementTheme.Default ? root.ActualTheme : root.RequestedTheme;
         Transport.RequestedTheme = theme;
         Transport.ApplyCapsuleTheme(theme);
-        foreach (var border in new[] { pill, front, back }) { border.Background = PreviewTransport.Glass(theme); border.BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(55, 150, 150, 150)); }
+        pill.Background = PreviewTransport.Glass(theme);
+        foreach (var border in new[] { front, back }) border.Background = PreviewTransport.FrostedPanel(theme);
+        foreach (var border in new[] { pill, front, back }) border.BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(55, 150, 150, 150));
         foreach (var button in glassButtons) PreviewTransport.ApplyGlass(button, theme);
     }
     private void OnHostThemeChanged(FrameworkElement sender, object args) => Theme();
@@ -163,6 +170,7 @@ internal sealed class PlaybackCapsule : IDisposable
     }
     internal void Open(bool preview)
     {
+        CancelCardSwitch();
         bool wasVisible = IsOpen;
         previewFront = preview && session.SongId is not null;
         expanded = true;
@@ -172,6 +180,7 @@ internal sealed class PlaybackCapsule : IDisposable
     internal void Close()
     {
         if (!IsOpen || !expanded) return;
+        CancelCardSwitch();
         expanded = false; Morph(false);
     }
     private void OnRootSizeChanged(object sender, SizeChangedEventArgs args) => ResizeBar();
@@ -237,11 +246,50 @@ internal sealed class PlaybackCapsule : IDisposable
         Add(back, "Opacity", opening ? 0 : back.Opacity, opening ? 1 : 0);
         storyboard.Completed += (_, _) => Finish(); storyboard.Begin();
     }
-    private void Animate()
+    private void CancelCardSwitch()
     {
-        if (!new Windows.UI.ViewManagement.UISettings().AnimationsEnabled) return;
-        var animation = new DoubleAnimation { From = .55, To = 1, Duration = TimeSpan.FromMilliseconds(220) };
-        var storyboard = new Storyboard(); Storyboard.SetTarget(animation, front); Storyboard.SetTargetProperty(animation, "Opacity"); storyboard.Children.Add(animation); storyboard.Begin();
+        cardRevision++; cardSwitch?.Stop(); cardSwitch = null;
+        switchTransform.ScaleX = switchTransform.ScaleY = 1; switchTransform.TranslateY = 0;
+        front.Opacity = 1; front.IsHitTestVisible = true;
+    }
+    private void AnimateCardSwitch(bool target, int direction)
+    {
+        if (!new Windows.UI.ViewManagement.UISettings().AnimationsEnabled) { previewFront = target; Refresh(); return; }
+        long request = ++cardRevision;
+        front.IsHitTestVisible = false;
+        void Phase(bool incoming)
+        {
+            var storyboard = new Storyboard(); cardSwitch = storyboard;
+            void Add(DependencyObject element, string property, double from, double to)
+            {
+                var animation = new DoubleAnimation { From = from, To = to, Duration = TimeSpan.FromMilliseconds(110), EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut } };
+                Storyboard.SetTarget(animation, element); Storyboard.SetTargetProperty(animation, property); storyboard.Children.Add(animation);
+            }
+            Add(switchTransform, "ScaleX", incoming ? .94 : 1, incoming ? 1 : .94);
+            Add(switchTransform, "ScaleY", incoming ? .94 : 1, incoming ? 1 : .94);
+            Add(switchTransform, "TranslateY", incoming ? -direction * 16 : 0, incoming ? 0 : direction * 16);
+            Add(front, "Opacity", incoming ? .25 : 1, incoming ? 1 : .25);
+            storyboard.Completed += (_, _) =>
+            {
+                if (request != cardRevision) return;
+                storyboard.Stop();
+                if (!incoming)
+                {
+                    // Swap only at the depth transition, preserving the session/player.
+                    previewFront = target; Refresh();
+                    if (request != cardRevision) return;
+                    root.UpdateLayout(); Phase(true);
+                }
+                else
+                {
+                    cardSwitch = null; switchTransform.ScaleX = switchTransform.ScaleY = 1;
+                    switchTransform.TranslateY = 0; front.Opacity = 1; front.IsHitTestVisible = true;
+                    if (FocusManager.FindFirstFocusableElement(front) is Control control) control.Focus(FocusState.Programmatic);
+                }
+            };
+            storyboard.Begin();
+        }
+        Phase(false);
     }
     private void Wheel(object sender, PointerRoutedEventArgs e)
     {
@@ -251,12 +299,11 @@ internal sealed class PlaybackCapsule : IDisposable
     }
     internal void SwitchCard(int delta)
     {
-        if (!IsOpen || session.SongId is null || Transport.IsDragging) return;
+        if (!IsOpen || !expanded || session.SongId is null || Transport.IsDragging || IsTransitioning) return;
         wheelRemainder += delta;
         if (Math.Abs(wheelRemainder) < 120) return;
-        long now = Environment.TickCount64;
-        if (now - wheelAt < 220) { wheelRemainder = 0; return; }
-        wheelAt = now; wheelRemainder = 0; previewFront = !previewFront; Refresh(); Animate();
+        int direction = Math.Sign(wheelRemainder);
+        wheelRemainder = 0; AnimateCardSwitch(!previewFront, direction);
     }
     private void Press(object sender, PointerRoutedEventArgs e)
     {
@@ -283,7 +330,7 @@ internal sealed class PlaybackCapsule : IDisposable
         if (click)
             Open(session.SongId is not null && (!session.Singing || p.X < Bar.ActualWidth / 2));
     }
-    public void Dispose() { marqueeTimer.Stop(); morph?.Stop(); widthTransition?.Stop(); root.SizeChanged -= OnRootSizeChanged; root.ActualThemeChanged -= OnHostThemeChanged; root.UnregisterPropertyChangedCallback(FrameworkElement.RequestedThemeProperty, hostThemeToken); session.Changed -= Refresh; Transport.Bind(null); }
+    public void Dispose() { CancelCardSwitch(); marqueeTimer.Stop(); morph?.Stop(); widthTransition?.Stop(); root.SizeChanged -= OnRootSizeChanged; root.ActualThemeChanged -= OnHostThemeChanged; root.UnregisterPropertyChangedCallback(FrameworkElement.RequestedThemeProperty, hostThemeToken); session.Changed -= Refresh; Transport.Bind(null); }
     [StructLayout(LayoutKind.Sequential)] private struct NativePoint { public int X, Y; }
     [DllImport("user32.dll")] private static extern bool ReleaseCapture();
     [DllImport("user32.dll")] private static extern bool GetCursorPos(out NativePoint point);
