@@ -23,11 +23,14 @@ internal sealed class PreviewCheckWindow : Window
     public PreviewCheckWindow(string reportPath)
     {
         Content = root; Title = "Vesper · 预览隔离检查";
+        AppWindow.Resize(new Windows.Graphics.SizeInt32(1000, 640));
+        root.RequestedTheme = ElementTheme.Dark;
+        root.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 32, 32, 36));
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(48) }); root.RowDefinitions.Add(new RowDefinition());
         Grid.SetRow(details, 1); root.Children.Add(details);
         session = new(DispatcherQueue);
         PlaybackCapsule? current = null;
-        capsule = new(root, session, WinRT.Interop.WindowNative.GetWindowHandle(this), () => session.Playback.Attach(current?.ShowingPreview == true ? current.Video : details), () => now);
+        capsule = new(root, session, WinRT.Interop.WindowNative.GetWindowHandle(this), () => session.Playback.Attach(current?.NeedsPreviewSurface == true ? current.Video : details), () => now);
         current = capsule;
         root.Loaded += async (_, _) => { if (!started) { started = true; await Run(reportPath); } };
         Closed += (_, _) => { capsule.Dispose(); session.Dispose(); };
@@ -35,6 +38,8 @@ internal sealed class PreviewCheckWindow : Window
     private async Task Run(string reportPath)
     {
         var checks = new List<object>(); string? error = null;
+        var deckFrames = new List<object>();
+        var deckSamples = new List<object>();
         void Check(bool pass, string name) { checks.Add(new { Name = name, Passed = pass }); if (!pass) throw new InvalidOperationException(name); }
         async Task Until(Func<bool> condition)
         {
@@ -42,6 +47,52 @@ internal sealed class PreviewCheckWindow : Window
             while (!condition()) { if (Environment.TickCount64 - start > 15000) throw new TimeoutException(); await Task.Delay(30); }
         }
         static void Invoke(Button button) => ((IInvokeProvider)new ButtonAutomationPeer(button).GetPattern(PatternInterface.Invoke)).Invoke();
+        async Task CaptureDeck(string name)
+        {
+            root.UpdateLayout();
+            var bitmap = new RenderTargetBitmap(); await bitmap.RenderAsync(capsule.Overlay);
+            var buffer = await bitmap.GetPixelsAsync(); byte[] pixels = new byte[buffer.Length];
+            using (var reader = DataReader.FromBuffer(buffer)) reader.ReadBytes(pixels);
+            for (int i = 0; i < pixels.Length; i += 4)
+            {
+                double alpha = pixels[i + 3] / 255d;
+                for (int c = 0; c < 3; c++) pixels[i + c] = (byte)Math.Clamp(pixels[i + c] + 32 * (1 - alpha), 0, 255);
+                pixels[i + 3] = 255;
+            }
+            using var stream = new InMemoryRandomAccessStream();
+            var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, stream);
+            encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied, (uint)bitmap.PixelWidth, (uint)bitmap.PixelHeight, 96, 96, pixels);
+            await encoder.FlushAsync(); stream.Seek(0);
+            string file = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(reportPath))!, name + ".png");
+            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+            await using var output = File.Create(file); using var input = stream.AsStreamForRead(); await input.CopyToAsync(output);
+            deckFrames.Add(new { Name = name, File = file, Singing = capsule.SingingBounds, Preview = capsule.PreviewBounds, Order = capsule.DeckOrder });
+        }
+        async Task TrackSwitch(int delta, string name)
+        {
+            await CaptureDeck(name + "-before");
+            var singing = capsule.SingingBounds; var preview = capsule.PreviewBounds;
+            capsule.SwitchCard(delta);
+            bool animations = new Windows.UI.ViewManagement.UISettings().AnimationsEnabled;
+            Check(!animations || capsule.IsCardSwitching, "滚轮启动双卡换位：" + name);
+            if (animations) Check(ReferenceEquals(FocusManager.GetFocusedElement(root.XamlRoot), capsule.Bar), "换位期间焦点离开旧卡：" + name);
+            bool bothMoved = false, captured = false;
+            long start = Environment.TickCount64;
+            while (capsule.IsTransitioning)
+            {
+                var s = capsule.SingingBounds; var p = capsule.PreviewBounds;
+                bool moved = Math.Abs(s.Y - singing.Y) > 1 && Math.Abs(p.Y - preview.Y) > 1
+                    && Math.Abs(s.Width - singing.Width) > 1 && Math.Abs(p.Width - preview.Width) > 1;
+                bothMoved |= moved;
+                deckSamples.Add(new { Direction = name, Elapsed = Environment.TickCount64 - start, Singing = s, Preview = p, Moving = capsule.IsCardSwitching });
+                if (moved && !captured) { captured = true; await CaptureDeck(name + "-moving"); }
+                if (Environment.TickCount64 - start > 15000) throw new TimeoutException("Deck transition did not finish.");
+                await Task.Delay(16);
+            }
+            if (animations) Check(bothMoved, "实际几何采样证明前后两张卡同时位移和缩放：" + name);
+            Check(capsule.PersistentCardContents && !capsule.RearIsInteractive, "换位后保留两卡内容且后卡不可鼠标操作：" + name);
+            await CaptureDeck(name + "-after");
+        }
         async Task<(int MinX, int MaxX, int MinY, int MaxY, int RightPixels, bool ArrowTip)> CaptureIcon(Button button, string name)
         {
             root.UpdateLayout();
@@ -132,13 +183,35 @@ internal sealed class PreviewCheckWindow : Window
             await Until(() => !capsule.IsOpen);
             Check((session.Playback.Position - at).Duration().TotalMilliseconds < 80 && session.Playback.State == MediaPlaybackState.Paused,
                 "详情与胶囊表面往返保留暂停和进度");
-            capsule.Open(true); await Until(() => !capsule.IsTransitioning); capsule.SwitchCard(120);
-            Check(!new Windows.UI.ViewManagement.UISettings().AnimationsEnabled || capsule.IsCardSwitching, "滚轮启动前后卡缩放位移过渡");
-            await Until(() => !capsule.IsTransitioning);
+            capsule.Open(true); await Until(() => !capsule.IsTransitioning);
+            bool hintFound = false;
+            void FindHint(DependencyObject node)
+            {
+                if (node is TextBlock text && text.Text.Contains("滚轮切换", StringComparison.Ordinal)) hintFound = true;
+                for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++) FindHint(VisualTreeHelper.GetChild(node, i));
+            }
+            FindHint(capsule.Overlay);
+            Check(!hintFound && capsule.PersistentCardContents, "删除底部小字，两张卡长期保留各自完整内容");
+            var singingBefore = capsule.SingingBounds; var previewBefore = capsule.PreviewBounds;
+            await TrackSwitch(120, "forward");
             Check(!capsule.ShowingPreview && session.Playback.State == MediaPlaybackState.Paused, "滚轮切到后卡不影响播放");
-            capsule.SwitchCard(-120); await Until(() => !capsule.IsTransitioning);
+            Check(capsule.DeckOrder.Singing > capsule.DeckOrder.Preview && capsule.SingingBounds.Width > capsule.PreviewBounds.Width,
+                "原后卡升到前层，原前卡缩小退后，层级交换");
+            Check(capsule.NeedsPreviewSurface, "背面预览卡继续持有视频表面");
+            await TrackSwitch(-120, "reverse");
             Check(capsule.ShowingPreview, "反向滚轮循环切回预览卡");
-            capsule.SwitchCard(120); capsule.Close();
+            Check(Math.Abs(capsule.SingingBounds.Y - singingBefore.Y) < 1 && Math.Abs(capsule.PreviewBounds.Y - previewBefore.Y) < 1
+                && capsule.DeckOrder.Preview > capsule.DeckOrder.Singing, "反向后两张实体卡归位并恢复层级");
+            capsule.SwitchCard(120);
+            if (new Windows.UI.ViewManagement.UISettings().AnimationsEnabled)
+            {
+                var restingS = capsule.SingingBounds; var restingP = capsule.PreviewBounds;
+                await Until(() => Math.Abs(capsule.SingingBounds.Y - restingS.Y) > 2 && Math.Abs(capsule.PreviewBounds.Y - restingP.Y) > 2);
+            }
+            var closingS = capsule.SingingBounds; var closingP = capsule.PreviewBounds;
+            capsule.Close();
+            Check(Math.Abs(capsule.SingingBounds.Y - closingS.Y) < 1 && Math.Abs(capsule.PreviewBounds.Y - closingP.Y) < 1,
+                "运动中收起从两卡当前位置开始，不先跳回静止卡位");
             await Until(() => !capsule.IsOpen && !capsule.IsTransitioning);
             Check(session.Playback.State == MediaPlaybackState.Paused, "切卡中收起取消旧过渡且不改变暂停");
             capsule.Open(true);
@@ -202,6 +275,7 @@ internal sealed class PreviewCheckWindow : Window
         {
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(reportPath))!);
             await File.WriteAllTextAsync(reportPath, JsonSerializer.Serialize(new { Passed = error is null, Checks = checks, Error = error,
+                DeckFrames = deckFrames, DeckSamples = deckSamples,
                 Limits = "合成视频和程序调用；不代替真实鼠标拖窗、滚轮路由、玻璃像素及扬声器听感验收。" }, new JsonSerializerOptions { WriteIndented = true }));
             Close();
         }

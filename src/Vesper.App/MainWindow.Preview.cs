@@ -43,7 +43,7 @@ public sealed partial class MainWindow
     private void RoutePreviewSurface()
     {
         if (preview is null || capsule is null || closed) return;
-        MediaPlayerElement? surface = capsule.ShowingPreview ? capsule.Video
+        MediaPlayerElement? surface = capsule.NeedsPreviewSurface ? capsule.Video
             : previewDetails is { IsLoaded: true } details && details.PreviewSongId == preview.SongId ? details.PreviewSurface : null;
         preview.Playback.Attach(surface);
         previewDetails?.RefreshPreview();

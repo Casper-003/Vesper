@@ -15,14 +15,16 @@ internal sealed class PlaybackCapsule : IDisposable
 {
     internal readonly ContentControl Bar = new() { Height = 36, Width = 310, Margin = new Thickness(0, 6, 0, 0), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, IsTabStop = true, HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
     internal readonly Grid Overlay = new() { Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), Visibility = Visibility.Collapsed };
-    private readonly Border pill, front, back;
+    private readonly Border pill, singingCard, previewCard;
+    private Border front => previewFront ? previewCard : singingCard;
+    private Border back => previewFront ? singingCard : previewCard;
+    private readonly Grid deck = new() { Width = 420, Margin = new Thickness(0, 54, 0, 0), VerticalAlignment = VerticalAlignment.Top, HorizontalAlignment = HorizontalAlignment.Center };
     private readonly TextBlock title = new() { FontSize = 13, VerticalAlignment = VerticalAlignment.Center };
     private readonly ScrollViewer marquee = new() { HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, HorizontalScrollMode = ScrollMode.Disabled };
     private readonly StackPanel singingPanel = new() { Spacing = 10 };
     private readonly StackPanel previewPanel = new() { Spacing = 8 };
     private readonly TextBlock songTitle = new() { FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
     private readonly TextBlock artist = new() { FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis };
-    private readonly TextBlock rearLabel = new() { FontSize = 10, VerticalAlignment = VerticalAlignment.Bottom, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 2) };
     private readonly Image cover = new() { Width = 88, Height = 88, Stretch = Stretch.UniformToFill };
     internal readonly MediaPlayerElement Video = new() { Width = 128, Height = 72, AreTransportControlsEnabled = false };
     internal readonly PreviewTransport Transport = new(capsuleMode: true);
@@ -41,7 +43,7 @@ internal sealed class PlaybackCapsule : IDisposable
     private bool expanded;
     private Storyboard? morph, widthTransition;
     private readonly CompositeTransform morphTransform = new();
-    private readonly CompositeTransform switchTransform = new();
+    private readonly CompositeTransform singingPose = new(), previewPose = new();
     private Storyboard? cardSwitch;
     private long cardRevision;
     public bool IsOpen => Overlay.Visibility == Visibility.Visible;
@@ -51,7 +53,14 @@ internal sealed class PlaybackCapsule : IDisposable
     internal bool IsCardSwitching => cardSwitch is not null;
     internal Brush PanelMaterial => front.Background;
     internal Rect CardBounds => front.TransformToVisual(root).TransformBounds(new Rect(0, 0, front.ActualWidth, front.ActualHeight));
+    internal Rect SingingBounds => singingCard.TransformToVisual(root).TransformBounds(new Rect(0, 0, singingCard.ActualWidth, singingCard.ActualHeight));
+    internal Rect PreviewBounds => previewCard.TransformToVisual(root).TransformBounds(new Rect(0, 0, previewCard.ActualWidth, previewCard.ActualHeight));
+    internal FrameworkElement Deck => deck;
+    internal bool PersistentCardContents => ReferenceEquals(singingCard.Child, singingPanel) && ReferenceEquals(previewCard.Child, previewPanel);
+    internal bool RearIsInteractive => back.IsHitTestVisible;
+    internal (int Singing, int Preview) DeckOrder => (Canvas.GetZIndex(singingCard), Canvas.GetZIndex(previewCard));
     public bool ShowingPreview => IsOpen && previewFront && session.SongId is not null;
+    internal bool NeedsPreviewSurface => IsOpen && session.SongId is not null;
     internal event Action? ReturnToDetails;
     internal event Action? BeginSinging;
 
@@ -69,28 +78,36 @@ internal sealed class PlaybackCapsule : IDisposable
         Bar.PointerReleased += Release;
         Bar.PointerCanceled += (_, _) => gesture.Cancel();
         Bar.PointerCaptureLost += (_, _) => gesture.Cancel();
-        Bar.KeyDown += (_, e) => { if (e.Key is VirtualKey.Enter or VirtualKey.Space) { Open(session.SongId is not null); e.Handled = true; } };
-        back = new Border { Width = 396, Height = 140, Margin = new Thickness(0, 70, 0, 0), VerticalAlignment = VerticalAlignment.Top, HorizontalAlignment = HorizontalAlignment.Center, CornerRadius = new CornerRadius(18), IsHitTestVisible = false };
-        front = new Border { Width = 420, MinHeight = 150, Margin = new Thickness(0, 54, 0, 0), Padding = new Thickness(14), VerticalAlignment = VerticalAlignment.Top, HorizontalAlignment = HorizontalAlignment.Center, CornerRadius = new CornerRadius(18), BorderThickness = new Thickness(1) };
-        Overlay.Children.Add(back); Overlay.Children.Add(front);
-        var transforms = new TransformGroup(); transforms.Children.Add(switchTransform); transforms.Children.Add(morphTransform);
-        front.RenderTransform = transforms;
-        front.RenderTransformOrigin = new Point(.5, 0);
-        back.Child = rearLabel;
-        front.SizeChanged += (_, _) => back.Height = front.ActualHeight;
+        Bar.KeyDown += (_, e) => { if (e.Key is VirtualKey.Enter or VirtualKey.Space) { if (!IsCardSwitching) Open(session.SongId is not null); e.Handled = true; } };
+        static Border Card(CompositeTransform pose) => new()
+        {
+            Width = 420, MinHeight = 150, Padding = new Thickness(14), VerticalAlignment = VerticalAlignment.Top,
+            CornerRadius = new CornerRadius(18), BorderThickness = new Thickness(1),
+            RenderTransform = pose, RenderTransformOrigin = new Point(.5, 0)
+        };
+        singingCard = Card(singingPose); previewCard = Card(previewPose);
+        deck.Children.Add(singingCard); deck.Children.Add(previewCard); Overlay.Children.Add(deck);
+        deck.RenderTransform = morphTransform; deck.RenderTransformOrigin = new Point(.5, 0);
         // The overlay already shields covered siblings. Do not mark child press/
         // release handled: native Button/Slider need the full gesture themselves.
         Overlay.PointerPressed += (_, e) =>
         {
+            if (IsCardSwitching)
+            {
+                Point p = e.GetCurrentPoint(deck).Position;
+                if (p.X >= 0 && p.X <= deck.ActualWidth && p.Y >= -16 && p.Y <= deck.ActualHeight + 48)
+                { e.Handled = true; return; }
+            }
             for (DependencyObject? node = e.OriginalSource as DependencyObject; node is not null; node = VisualTreeHelper.GetParent(node))
                 if (ReferenceEquals(node, front)) return;
             Close(); e.Handled = true;
         };
-        front.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler(Wheel), true);
+        deck.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler(Wheel), true);
         root.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, e) => { if (IsOpen && e.Key == VirtualKey.Escape) { Close(); e.Handled = true; } }), true);
         root.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, e) =>
         {
             if (!IsOpen || e.Key != VirtualKey.Tab) return;
+            if (IsCardSwitching) { e.Handled = true; return; }
             var controls = new List<Control>();
             void Visit(DependencyObject node)
             {
@@ -126,6 +143,8 @@ internal sealed class PlaybackCapsule : IDisposable
         singingPanel.Children.Add(new TextBlock { Text = "演唱播放尚未接入，当前可从歌曲详情开始预览。", TextWrapping = TextWrapping.Wrap });
         var start = new Button { Content = "开始演唱", IsEnabled = false }; start.Click += (_, _) => BeginSinging?.Invoke(); singingPanel.Children.Add(start);
         glassButtons.Add(start);
+        singingCard.Child = singingPanel; previewCard.Child = previewPanel;
+        SettleDeck();
         Transport.Bind(session);
         session.Changed += Refresh;
         root.SizeChanged += OnRootSizeChanged;
@@ -141,8 +160,8 @@ internal sealed class PlaybackCapsule : IDisposable
         Transport.RequestedTheme = theme;
         Transport.ApplyCapsuleTheme(theme);
         pill.Background = PreviewTransport.Glass(theme);
-        foreach (var border in new[] { front, back }) border.Background = PreviewTransport.FrostedPanel(theme);
-        foreach (var border in new[] { pill, front, back }) border.BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(55, 150, 150, 150));
+        foreach (var border in new[] { singingCard, previewCard }) border.Background = PreviewTransport.FrostedPanel(theme);
+        foreach (var border in new[] { pill, singingCard, previewCard }) border.BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(55, 150, 150, 150));
         foreach (var button in glassButtons) PreviewTransport.ApplyGlass(button, theme);
     }
     private void OnHostThemeChanged(FrameworkElement sender, object args) => Theme();
@@ -160,11 +179,9 @@ internal sealed class PlaybackCapsule : IDisposable
         cover.Visibility = session.Playback.VideoWidth > 0 ? Visibility.Collapsed : Visibility.Visible;
         if (IsOpen)
         {
-            if (session.SongId is null && previewFront) { if (expanded) Close(); return; }
-            var content = previewFront ? previewPanel : singingPanel;
-            if (!ReferenceEquals(front.Child, content)) front.Child = content;
-            back.Visibility = session.SongId is not null ? Visibility.Visible : Visibility.Collapsed;
-            rearLabel.Text = previewFront ? "滚轮切换 · 演唱" : "滚轮切换 · 预览";
+            if (session.SongId is null && (previewFront || IsCardSwitching)) { if (expanded) Close(); return; }
+            previewCard.Visibility = session.SongId is not null ? Visibility.Visible : Visibility.Collapsed;
+            if (!IsCardSwitching && expanded && morph is null) SettleDeck();
         }
         routeChanged();
     }
@@ -173,6 +190,7 @@ internal sealed class PlaybackCapsule : IDisposable
         CancelCardSwitch();
         bool wasVisible = IsOpen;
         previewFront = preview && session.SongId is not null;
+        SettleDeck();
         expanded = true;
         Overlay.Visibility = Visibility.Visible; Refresh(); Morph(true, !wasVisible);
         if (Microsoft.UI.Xaml.Input.FocusManager.FindFirstFocusableElement(front) is Control control) control.Focus(FocusState.Programmatic);
@@ -180,7 +198,7 @@ internal sealed class PlaybackCapsule : IDisposable
     internal void Close()
     {
         if (!IsOpen || !expanded) return;
-        CancelCardSwitch();
+        CancelCardSwitch(settle: false);
         expanded = false; Morph(false);
     }
     private void OnRootSizeChanged(object sender, SizeChangedEventArgs args) => ResizeBar();
@@ -213,9 +231,9 @@ internal sealed class PlaybackCapsule : IDisposable
     {
         long request = ++transitionRevision;
         root.UpdateLayout();
-        double sx = Math.Clamp(Bar.ActualWidth / Math.Max(1, front.ActualWidth), .1, 1);
-        double sy = Math.Clamp(Bar.ActualHeight / Math.Max(1, front.ActualHeight), .05, 1);
-        double dy = Bar.TransformToVisual(root).TransformPoint(default).Y - front.TransformToVisual(root).TransformPoint(default).Y + morphTransform.TranslateY;
+        double sx = Math.Clamp(Bar.ActualWidth / Math.Max(1, deck.ActualWidth), .1, 1);
+        double sy = Math.Clamp(Bar.ActualHeight / Math.Max(1, deck.ActualHeight), .05, 1);
+        double dy = Bar.TransformToVisual(root).TransformPoint(default).Y - deck.TransformToVisual(root).TransformPoint(default).Y + morphTransform.TranslateY;
         // Capture effective values before stopping, so quick reversal continues in place.
         double x = morphTransform.ScaleX, y = morphTransform.ScaleY, offset = morphTransform.TranslateY;
         morph?.Stop();
@@ -226,10 +244,11 @@ internal sealed class PlaybackCapsule : IDisposable
             if (request != transitionRevision) return;
             morph?.Stop(); morph = null;
             morphTransform.ScaleX = opening ? 1 : sx; morphTransform.ScaleY = opening ? 1 : sy; morphTransform.TranslateY = opening ? 0 : dy;
-            back.Opacity = opening ? 1 : 0;
+            deck.Opacity = opening ? 1 : 0;
             if (!opening)
             {
                 Overlay.Visibility = Visibility.Collapsed; Bar.Opacity = 1; Bar.IsHitTestVisible = true;
+                SettleDeck();
                 routeChanged(); Bar.Focus(FocusState.Programmatic);
             }
         }
@@ -243,51 +262,97 @@ internal sealed class PlaybackCapsule : IDisposable
         Add(morphTransform, "ScaleX", morphTransform.ScaleX, opening ? 1 : sx);
         Add(morphTransform, "ScaleY", morphTransform.ScaleY, opening ? 1 : sy);
         Add(morphTransform, "TranslateY", morphTransform.TranslateY, opening ? 0 : dy);
-        Add(back, "Opacity", opening ? 0 : back.Opacity, opening ? 1 : 0);
+        Add(deck, "Opacity", opening && fresh ? 0 : deck.Opacity, opening ? 1 : 0);
         storyboard.Completed += (_, _) => Finish(); storyboard.Begin();
     }
-    private void CancelCardSwitch()
+    private void CancelCardSwitch(bool settle = true)
     {
+        // Retain effective poses before Stop resets animation properties. Closing
+        // can then shrink the moving deck in place rather than snapping it back.
+        var poses = new[] { singingPose, previewPose }.Select(p => (p.ScaleX, p.ScaleY, p.TranslateY)).ToArray();
+        double singingOpacity = singingCard.Opacity, previewOpacity = previewCard.Opacity;
         cardRevision++; cardSwitch?.Stop(); cardSwitch = null;
-        switchTransform.ScaleX = switchTransform.ScaleY = 1; switchTransform.TranslateY = 0;
-        front.Opacity = 1; front.IsHitTestVisible = true;
+        if (settle) SettleDeck();
+        else
+        {
+            for (int i = 0; i < poses.Length; i++)
+            {
+                var pose = i == 0 ? singingPose : previewPose;
+                pose.ScaleX = poses[i].ScaleX; pose.ScaleY = poses[i].ScaleY; pose.TranslateY = poses[i].TranslateY;
+            }
+            singingCard.Opacity = singingOpacity; previewCard.Opacity = previewOpacity;
+            singingCard.IsHitTestVisible = previewCard.IsHitTestVisible = false;
+        }
+    }
+    private CompositeTransform Pose(Border card) => ReferenceEquals(card, singingCard) ? singingPose : previewPose;
+    private void SettleDeck()
+    {
+        if (!IsOpen && session.SongId is null) previewFront = false;
+        foreach (var card in new[] { singingCard, previewCard })
+        {
+            bool foreground = ReferenceEquals(card, front);
+            var pose = Pose(card);
+            pose.ScaleX = pose.ScaleY = foreground ? 1 : .94;
+            pose.TranslateY = foreground ? 0 : 24;
+            // Depth is conveyed by position/scale. Fading the whole acrylic card
+            // would expose sharp text from the other card through its surface.
+            card.Opacity = 1;
+            card.IsHitTestVisible = foreground;
+            Canvas.SetZIndex(card, foreground ? 2 : 1);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetAccessibilityView(card,
+                foreground ? Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Content : Microsoft.UI.Xaml.Automation.Peers.AccessibilityView.Raw);
+        }
+        previewCard.Visibility = session.SongId is not null || IsOpen && previewFront ? Visibility.Visible : Visibility.Collapsed;
     }
     private void AnimateCardSwitch(bool target, int direction)
     {
-        if (!new Windows.UI.ViewManagement.UISettings().AnimationsEnabled) { previewFront = target; Refresh(); return; }
+        if (!new Windows.UI.ViewManagement.UISettings().AnimationsEnabled) { previewFront = target; SettleDeck(); Refresh(); return; }
         long request = ++cardRevision;
-        front.IsHitTestVisible = false;
-        void Phase(bool incoming)
+        Border outgoing = front, incoming = back;
+        CompositeTransform leavingPose = Pose(outgoing), enteringPose = Pose(incoming);
+        outgoing.IsHitTestVisible = incoming.IsHitTestVisible = false;
+        Bar.Focus(FocusState.Programmatic);
+        double outgoingMid = direction > 0 ? 40 : -12;
+        double incomingMid = direction > 0 ? -12 : 40;
+        void Phase(bool second)
         {
+            if (request != cardRevision) return;
             var storyboard = new Storyboard(); cardSwitch = storyboard;
             void Add(DependencyObject element, string property, double from, double to)
             {
                 var animation = new DoubleAnimation { From = from, To = to, Duration = TimeSpan.FromMilliseconds(110), EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut } };
                 Storyboard.SetTarget(animation, element); Storyboard.SetTargetProperty(animation, property); storyboard.Children.Add(animation);
             }
-            Add(switchTransform, "ScaleX", incoming ? .94 : 1, incoming ? 1 : .94);
-            Add(switchTransform, "ScaleY", incoming ? .94 : 1, incoming ? 1 : .94);
-            Add(switchTransform, "TranslateY", incoming ? -direction * 16 : 0, incoming ? 0 : direction * 16);
-            Add(front, "Opacity", incoming ? .25 : 1, incoming ? 1 : .25);
+            foreach (string axis in new[] { "ScaleX", "ScaleY" })
+            {
+                Add(leavingPose, axis, second ? .97 : 1, second ? .94 : .97);
+                Add(enteringPose, axis, second ? .97 : .94, second ? 1 : .97);
+            }
+            Add(leavingPose, "TranslateY", second ? outgoingMid : 0, second ? 24 : outgoingMid);
+            Add(enteringPose, "TranslateY", second ? incomingMid : 24, second ? 0 : incomingMid);
             storyboard.Completed += (_, _) =>
             {
                 if (request != cardRevision) return;
                 storyboard.Stop();
-                if (!incoming)
+                if (!second)
                 {
-                    // Swap only at the depth transition, preserving the session/player.
-                    previewFront = target; Refresh();
+                    leavingPose.ScaleX = leavingPose.ScaleY = enteringPose.ScaleX = enteringPose.ScaleY = .97;
+                    leavingPose.TranslateY = outgoingMid; enteringPose.TranslateY = incomingMid;
+                    outgoing.Opacity = incoming.Opacity = 1;
+                    // Both real cards keep their children throughout; only depth changes.
+                    previewFront = target;
+                    Canvas.SetZIndex(incoming, 2); Canvas.SetZIndex(outgoing, 1);
+                    Refresh();
                     if (request != cardRevision) return;
                     root.UpdateLayout(); Phase(true);
                 }
                 else
                 {
-                    cardSwitch = null; switchTransform.ScaleX = switchTransform.ScaleY = 1;
-                    switchTransform.TranslateY = 0; front.Opacity = 1; front.IsHitTestVisible = true;
+                    cardSwitch = null; SettleDeck(); routeChanged();
                     if (FocusManager.FindFirstFocusableElement(front) is Control control) control.Focus(FocusState.Programmatic);
                 }
             };
-            storyboard.Begin();
+            routeChanged(); storyboard.Begin();
         }
         Phase(false);
     }
@@ -295,7 +360,7 @@ internal sealed class PlaybackCapsule : IDisposable
     {
         e.Handled = true;
         if (session.SongId is null || Transport.IsDragging) return;
-        SwitchCard(e.GetCurrentPoint(front).Properties.MouseWheelDelta);
+        SwitchCard(e.GetCurrentPoint(deck).Properties.MouseWheelDelta);
     }
     internal void SwitchCard(int delta)
     {
