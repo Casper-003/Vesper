@@ -167,6 +167,7 @@ public sealed partial class MainWindow
     private void OnQueueRootKeyDown(object sender, KeyRoutedEventArgs args)
     {
         if (args.Key != VirtualKey.Escape) return;
+        if (capsule?.IsOpen == true) { capsule.Close(); args.Handled = true; return; }
         if (CancelQueueDrag()) { args.Handled = true; return; }
         if (queuePanelOpen) { SetQueueOpen(false); args.Handled = true; }
     }

@@ -6,10 +6,13 @@
   <Grid x:Name="DetailsLayout" Margin="0,24,0,40" SizeChanged="OnDetailsSizeChanged">
     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
     <Grid x:Name="CoverPanel" HorizontalAlignment="Center">
-      <Border x:Name="CoverArt" Width="320" Height="320" VerticalAlignment="Center" CornerRadius="8" Background="{ThemeResource ControlFillColorSecondaryBrush}">
+      <Border x:Name="CoverArt" Width="320" Height="320" VerticalAlignment="Center" CornerRadius="8" Background="{ThemeResource ControlFillColorSecondaryBrush}" PointerEntered="OnPreviewCoverEntered" PointerExited="OnPreviewCoverExited">
         <Grid>
           <FontIcon Glyph="&#xE93C;" FontSize="80" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Visibility="{Binding HasNoCover, Converter={StaticResource BoolVisibility}}"/>
           <Image Source="{Binding Cover}" Stretch="Uniform" Visibility="{Binding HasCover, Converter={StaticResource BoolVisibility}}" AutomationProperties.Name="专辑封面"/>
+          <MediaPlayerElement x:Name="PreviewVideo" AreTransportControlsEnabled="False" Visibility="Collapsed"/>
+          <Button x:Name="PreviewPlay" Width="44" Height="44" Padding="0" CornerRadius="22" Opacity="0" HorizontalAlignment="Center" VerticalAlignment="Center" Click="OnPreviewPlay" GotFocus="OnPreviewPlayFocused" LostFocus="OnPreviewPlayBlurred" IsEnabled="{Binding IsAvailable}" ToolTipService.ToolTip="预览歌曲" AutomationProperties.Name="预览歌曲"><FontIcon Glyph="&#xE768;" FontSize="18"/></Button>
+          <ContentControl x:Name="PreviewControls" VerticalAlignment="Bottom" HorizontalContentAlignment="Stretch" Margin="6" Visibility="Collapsed"/>
         </Grid>
       </Border>
       <Grid VerticalAlignment="Center">

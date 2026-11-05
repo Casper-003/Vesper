@@ -24,10 +24,30 @@ internal sealed class LocalMediaPlayback(DispatcherQueue dispatcher) : IDisposab
     public MediaPlaybackState State => player?.PlaybackSession.PlaybackState ?? MediaPlaybackState.None;
     public uint VideoWidth => player?.PlaybackSession.NaturalVideoWidth ?? 0;
     public uint VideoHeight => player?.PlaybackSession.NaturalVideoHeight ?? 0;
+    private double volume = .6;
+    private bool muted;
+    public double Volume
+    {
+        get => volume;
+        set { VerifyAccess(); volume = Math.Clamp(value, 0, 1); if (player is not null) player.Volume = volume; }
+    }
+    public bool IsMuted
+    {
+        get => muted;
+        set { VerifyAccess(); muted = value; if (player is not null) player.IsMuted = value; }
+    }
+    public void Seek(TimeSpan position)
+    {
+        VerifyAccess();
+        var current = ReadyPlayer();
+        if (!current.PlaybackSession.CanSeek) return;
+        current.PlaybackSession.Position = TimeSpan.FromTicks(Math.Clamp(position.Ticks, 0, Duration.Ticks));
+    }
 
     public void Attach(MediaPlayerElement? target)
     {
         VerifyAccess();
+        if (ReferenceEquals(surface, target)) return;
         surface?.SetMediaPlayer(null);
         surface = target;
         if (surface is not null)
@@ -50,7 +70,7 @@ internal sealed class LocalMediaPlayback(DispatcherQueue dispatcher) : IDisposab
             StorageFile file = await StorageFile.GetFileFromPathAsync(Path.GetFullPath(path)).AsTask(timeout.Token);
             timeout.Token.ThrowIfCancellationRequested();
             if (request != revision) throw new OperationCanceledException("Playback replaced.");
-            var current = new MediaPlayer { AutoPlay = false, IsLoopingEnabled = false };
+            var current = new MediaPlayer { AutoPlay = false, IsLoopingEnabled = false, Volume = volume, IsMuted = muted };
             player = current;
             current.CommandManager.IsEnabled = false;
             var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

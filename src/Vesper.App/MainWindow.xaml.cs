@@ -52,6 +52,7 @@ public sealed partial class MainWindow : Window
         ExtendsContentIntoTitleBar = true;
         AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
         SetTitleBar(AppTitleBar);
+        InitializePreview();
         AppWindow.TitleBar.ButtonBackgroundColor = Colors.Transparent;
         AppWindow.TitleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
         AppWindow.Resize(new SizeInt32(1200, 800));
@@ -266,7 +267,13 @@ public sealed partial class MainWindow : Window
             if (end > x) regions.Add(new RectInt32((int)Math.Ceiling(x * scale), 0,
                 (int)Math.Floor((end - x) * scale), (int)Math.Round(AppTitleBar.ActualHeight * scale)));
         }
-        Add(left, right);
+        if (capsule is not null && capsule.Bar.ActualWidth > 0)
+        {
+            double capsuleLeft = capsule.Bar.TransformToVisual(Root).TransformPoint(default).X;
+            Add(left, Math.Max(left, capsuleLeft));
+            Add(Math.Min(right, capsuleLeft + capsule.Bar.ActualWidth), right);
+        }
+        else Add(left, right);
         AppWindow.TitleBar.SetDragRectangles(regions.ToArray());
     }
 
