@@ -23,9 +23,9 @@ internal sealed class PlaybackCapsule : IDisposable
     private readonly TextBlock songTitle = new() { FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
     private readonly TextBlock artist = new() { FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis };
     private readonly TextBlock rearLabel = new() { FontSize = 10, VerticalAlignment = VerticalAlignment.Bottom, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 2) };
-    private readonly Image cover = new() { Width = 88, Height = 72, Stretch = Stretch.UniformToFill };
+    private readonly Image cover = new() { Width = 88, Height = 88, Stretch = Stretch.UniformToFill };
     internal readonly MediaPlayerElement Video = new() { Width = 128, Height = 72, AreTransportControlsEnabled = false };
-    internal readonly PreviewTransport Transport = new();
+    internal readonly PreviewTransport Transport = new(capsuleMode: true);
     private readonly PreviewSession session;
     private readonly List<Button> glassButtons = [];
     private readonly nint hwnd;
@@ -37,12 +37,14 @@ internal sealed class PlaybackCapsule : IDisposable
     private readonly DispatcherTimer marqueeTimer = new() { Interval = TimeSpan.FromMilliseconds(33) };
     private readonly Func<long> clock;
     private readonly Grid root;
+    private readonly long hostThemeToken;
     private long marqueeStarted, transitionRevision;
     private bool expanded;
     private Storyboard? morph, widthTransition;
     private readonly CompositeTransform morphTransform = new();
     public bool IsOpen => Overlay.Visibility == Visibility.Visible;
     internal double MarqueeOffset => marquee.HorizontalOffset;
+    internal string Caption => title.Text;
     internal bool IsTransitioning => morph is not null;
     internal Rect CardBounds => front.TransformToVisual(root).TransformBounds(new Rect(0, 0, front.ActualWidth, front.ActualHeight));
     public bool ShowingPreview => IsOpen && previewFront && session.SongId is not null;
@@ -71,9 +73,14 @@ internal sealed class PlaybackCapsule : IDisposable
         front.RenderTransformOrigin = new Point(.5, 0);
         back.Child = rearLabel;
         front.SizeChanged += (_, _) => back.Height = front.ActualHeight;
-        Overlay.PointerPressed += (_, e) => { Close(); e.Handled = true; };
-        front.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, e) => e.Handled = true), true);
-        front.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler((_, e) => e.Handled = true), true);
+        // The overlay already shields covered siblings. Do not mark child press/
+        // release handled: native Button/Slider need the full gesture themselves.
+        Overlay.PointerPressed += (_, e) =>
+        {
+            for (DependencyObject? node = e.OriginalSource as DependencyObject; node is not null; node = VisualTreeHelper.GetParent(node))
+                if (ReferenceEquals(node, front)) return;
+            Close(); e.Handled = true;
+        };
         front.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler(Wheel), true);
         root.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, e) => { if (IsOpen && e.Key == VirtualKey.Escape) { Close(); e.Handled = true; } }), true);
         root.AddHandler(UIElement.KeyDownEvent, new KeyEventHandler((_, e) =>
@@ -105,14 +112,11 @@ internal sealed class PlaybackCapsule : IDisposable
         var heading = new Grid { ColumnSpacing = 12 };
         heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); heading.ColumnDefinitions.Add(new ColumnDefinition());
         heading.Children.Add(media);
-        var info = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Center }; info.Children.Add(songTitle); info.Children.Add(artist);
+        var info = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Center }; info.Children.Add(songTitle); info.Children.Add(artist); info.Children.Add(Transport);
         Grid.SetColumn(info, 1); heading.Children.Add(info);
-        previewPanel.Children.Add(heading); previewPanel.Children.Add(Transport);
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8 };
-        var details = PreviewTransport.Icon("\uE8A7", "返回预览详情"); var close = PreviewTransport.Icon("\uE711", "关闭预览");
-        glassButtons.AddRange([details, close]);
-        details.Click += (_, _) => { Close(); ReturnToDetails?.Invoke(); };
-        close.Click += (_, _) => session.Close(); actions.Children.Add(details); actions.Children.Add(close); previewPanel.Children.Add(actions);
+        previewPanel.Children.Add(heading);
+        Transport.ReturnRequested += () => { Close(); ReturnToDetails?.Invoke(); };
+        Transport.StopRequested += session.Close;
         singingPanel.Children.Add(new TextBlock { Text = "演唱", FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
         singingPanel.Children.Add(new TextBlock { Text = "演唱播放尚未接入，当前可从歌曲详情开始预览。", TextWrapping = TextWrapping.Wrap });
         var start = new Button { Content = "开始演唱", IsEnabled = false }; start.Click += (_, _) => BeginSinging?.Invoke(); singingPanel.Children.Add(start);
@@ -120,20 +124,28 @@ internal sealed class PlaybackCapsule : IDisposable
         Transport.Bind(session);
         session.Changed += Refresh;
         root.SizeChanged += OnRootSizeChanged;
+        hostThemeToken = root.RegisterPropertyChangedCallback(FrameworkElement.RequestedThemeProperty, (_, _) => Theme());
+        root.ActualThemeChanged += OnHostThemeChanged;
         marqueeTimer.Tick += (_, _) => TickMarquee();
         marqueeTimer.Start();
         Bar.ActualThemeChanged += (_, _) => Theme(); Theme(); Refresh();
     }
     private void Theme()
     {
-        foreach (var border in new[] { pill, front, back }) { border.Background = PreviewTransport.Glass(Bar.ActualTheme); border.BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(55, 150, 150, 150)); }
-        foreach (var button in glassButtons) PreviewTransport.ApplyGlass(button, Bar.ActualTheme);
+        ElementTheme theme = root.RequestedTheme == ElementTheme.Default ? root.ActualTheme : root.RequestedTheme;
+        Transport.RequestedTheme = theme;
+        Transport.ApplyCapsuleTheme(theme);
+        foreach (var border in new[] { pill, front, back }) { border.Background = PreviewTransport.Glass(theme); border.BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(55, 150, 150, 150)); }
+        foreach (var button in glassButtons) PreviewTransport.ApplyGlass(button, theme);
     }
+    private void OnHostThemeChanged(FrameworkElement sender, object args) => Theme();
     private void Refresh()
     {
-        string label = session.SongId is null ? "开始演唱" : session.Singing ? $"返回演唱   ·   🎧 {session.Title}" : $"🎧 {((session.Loading ? "正在准备" : session.Error.Length > 0 ? "预览失败" : session.Ended ? "预览结束" : session.Playback.State == Windows.Media.Playback.MediaPlaybackState.Paused ? "预览已暂停" : "正在预览"))} · {session.Title}";
+        string label = session.SongId is null ? "🪩" : session.Singing ? $"🪩 返回演唱   ·   🎵 {session.Title}" : $"🎵 {((session.Loading ? "正在准备" : session.Error.Length > 0 ? "预览失败" : session.Ended ? "预览结束" : session.Playback.State == Windows.Media.Playback.MediaPlaybackState.Paused ? "预览已暂停" : "正在听取"))} · {session.Title}";
         if (label != title.Text)
         {
+            title.FontSize = session.SongId is null ? 20 : 13;
+            ToolTipService.SetToolTip(Bar, session.SongId is null ? "开始演唱" : "打开播放控制");
             title.Text = label; marquee.ChangeView(0, null, null, true); marqueeStarted = clock(); ResizeBar();
         }
         songTitle.Text = session.Title; artist.Text = session.Artist; cover.Source = session.Cover;
@@ -142,7 +154,8 @@ internal sealed class PlaybackCapsule : IDisposable
         if (IsOpen)
         {
             if (session.SongId is null && previewFront) { if (expanded) Close(); return; }
-            front.Child = previewFront ? previewPanel : singingPanel;
+            var content = previewFront ? previewPanel : singingPanel;
+            if (!ReferenceEquals(front.Child, content)) front.Child = content;
             back.Visibility = session.SongId is not null ? Visibility.Visible : Visibility.Collapsed;
             rearLabel.Text = previewFront ? "滚轮切换 · 演唱" : "滚轮切换 · 预览";
         }
@@ -166,7 +179,7 @@ internal sealed class PlaybackCapsule : IDisposable
     {
         title.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         double limit = Math.Min(420, Math.Max(140, root.ActualWidth - 280));
-        double target = Math.Clamp(Math.Ceiling(title.DesiredSize.Width + 30), 120, limit);
+        double target = Math.Clamp(Math.Ceiling(title.DesiredSize.Width + 30), session.SongId is null ? 48 : 120, limit);
         if (Math.Abs(Bar.Width - target) < .5) return;
         double current = Bar.ActualWidth > 0 ? Bar.ActualWidth : target;
         widthTransition?.Stop(); Bar.Width = current;
@@ -270,7 +283,7 @@ internal sealed class PlaybackCapsule : IDisposable
         if (click)
             Open(session.SongId is not null && (!session.Singing || p.X < Bar.ActualWidth / 2));
     }
-    public void Dispose() { marqueeTimer.Stop(); morph?.Stop(); widthTransition?.Stop(); root.SizeChanged -= OnRootSizeChanged; session.Changed -= Refresh; Transport.Bind(null); }
+    public void Dispose() { marqueeTimer.Stop(); morph?.Stop(); widthTransition?.Stop(); root.SizeChanged -= OnRootSizeChanged; root.ActualThemeChanged -= OnHostThemeChanged; root.UnregisterPropertyChangedCallback(FrameworkElement.RequestedThemeProperty, hostThemeToken); session.Changed -= Refresh; Transport.Bind(null); }
     [StructLayout(LayoutKind.Sequential)] private struct NativePoint { public int X, Y; }
     [DllImport("user32.dll")] private static extern bool ReleaseCapture();
     [DllImport("user32.dll")] private static extern bool GetCursorPos(out NativePoint point);

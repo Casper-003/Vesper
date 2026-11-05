@@ -1,6 +1,10 @@
 using System.Text.Json;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Automation.Peers;
+using Microsoft.UI.Xaml.Automation.Provider;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Windows.Media.Playback;
 
 namespace Vesper.App;
@@ -34,6 +38,7 @@ internal sealed class PreviewCheckWindow : Window
             var start = Environment.TickCount64;
             while (!condition()) { if (Environment.TickCount64 - start > 15000) throw new TimeoutException(); await Task.Delay(30); }
         }
+        static void Invoke(Button button) => ((IInvokeProvider)new ButtonAutomationPeer(button).GetPattern(PatternInterface.Invoke)).Invoke();
         try
         {
             var gesture = new CapsuleGesture();
@@ -55,10 +60,12 @@ internal sealed class PreviewCheckWindow : Window
             capsule.Close();
             await Until(() => !capsule.IsOpen);
             double idleWidth = capsule.Bar.ActualWidth;
+            Check(capsule.Caption == "🪩", "空闲胶囊只显示 disco 球灯 emoji");
             string path = Environment.GetEnvironmentVariable("VESPER_PLAYBACK_CHECK_MEDIA") ?? throw new InvalidOperationException("Missing fixture");
             await session.StartAsync("one", string.Concat(Enumerable.Repeat("预览长标题测试", 12)), "合成媒体", null, path);
             await Until(() => session.Playback.Position.TotalMilliseconds > 250);
             Check(session.Error.Length == 0 && session.Playback.VideoWidth > 0, "真实本地 MV 预览播放");
+            Check(capsule.Caption.StartsWith("🎵 ", StringComparison.Ordinal), "正在听取使用音乐 emoji 前缀");
             session.TogglePause(); await Until(() => session.Playback.State == MediaPlaybackState.Paused);
             await Task.Delay(300); root.UpdateLayout();
             Check(capsule.Bar.ActualWidth > idleWidth && capsule.Bar.ActualWidth <= 420.5,
@@ -67,7 +74,14 @@ internal sealed class PreviewCheckWindow : Window
             Check(Math.Abs(left + capsule.Bar.ActualWidth / 2 - root.ActualWidth / 2) < 1, "变宽后仍保持窗口居中");
             now = 3000; capsule.TickMarquee(); await Task.Delay(50);
             double beforeVolume = capsule.MarqueeOffset;
+            capsule.Open(true); await Until(() => !capsule.IsTransitioning);
+            int unloads = 0;
+            capsule.Transport.Progress.Unloaded += (_, _) => unloads++;
+            capsule.Transport.Progress.Focus(FocusState.Programmatic);
+            object focused = FocusManager.GetFocusedElement(root.XamlRoot);
             for (int i = 0; i < 80; i++) session.SetVolume(i / 100d);
+            Check(unloads == 0 && focused is not null && ReferenceEquals(focused, FocusManager.GetFocusedElement(root.XamlRoot)),
+                "连续状态刷新不重挂载控件或丢失滑块焦点");
             capsule.TickMarquee(); await Task.Delay(50);
             Check(beforeVolume > 0 && Math.Abs(capsule.MarqueeOffset - beforeVolume) < 1,
                 "同一时刻连续调音量不会推进或重置滚动");
@@ -81,6 +95,32 @@ internal sealed class PreviewCheckWindow : Window
             capsule.Open(true); capsule.SwitchCard(120);
             Check(!capsule.ShowingPreview && session.Playback.State == MediaPlaybackState.Paused, "滚轮切到后卡不影响播放");
             await Task.Delay(250); capsule.SwitchCard(-120); Check(capsule.ShowingPreview, "反向滚轮循环切回预览卡");
+            await Until(() => !capsule.IsTransitioning);
+            root.UpdateLayout();
+            double x1 = capsule.Transport.ReturnButton.TransformToVisual(root).TransformPoint(default).X;
+            double x2 = capsule.Transport.PauseButton.TransformToVisual(root).TransformPoint(default).X;
+            double x3 = capsule.Transport.StopButton.TransformToVisual(root).TransformPoint(default).X;
+            Check(x1 < x2 && x2 < x3, $"胶囊按钮从左至右为返回、暂停／继续、停止 ({x1:F1}, {x2:F1}, {x3:F1})");
+            int sliders = 0;
+            void CountSliders(DependencyObject node)
+            {
+                if (node is Slider) sliders++;
+                for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++) CountSliders(VisualTreeHelper.GetChild(node, i));
+            }
+            CountSliders(capsule.Transport);
+            Check(sliders == 1, "简易胶囊只有进度条，没有音量入口");
+            root.RequestedTheme = ElementTheme.Light;
+            await Until(() => capsule.Transport.ReturnButton.Content is IconElement { Foreground: SolidColorBrush b } && b.Color == Microsoft.UI.Colors.Black);
+            root.RequestedTheme = ElementTheme.Dark;
+            await Until(() => capsule.Transport.ReturnButton.Content is IconElement { Foreground: SolidColorBrush b } && b.Color == Microsoft.UI.Colors.White);
+            Check(capsule.Transport.StopButton.Content is PathIcon && capsule.Transport.StopButton.BorderThickness == new Thickness(0),
+                "深浅主题使用黑白实心图形，无圆圈边框");
+            Invoke(capsule.Transport.PauseButton); await Until(() => session.Playback.State == MediaPlaybackState.Playing);
+            Invoke(capsule.Transport.PauseButton); await Until(() => session.Playback.State == MediaPlaybackState.Paused);
+            Check(true, "单次按钮调用即可继续或暂停预览");
+            int returns = 0; capsule.ReturnToDetails += () => returns++;
+            Invoke(capsule.Transport.ReturnButton); await Until(() => !capsule.IsOpen);
+            Check(returns == 1 && session.Playback.State == MediaPlaybackState.Paused, "单次返回详情调用保持暂停状态");
             session.Playback.Seek(TimeSpan.FromSeconds(1)); Check(session.Playback.Position.TotalSeconds > .8, "进度控制可定位真实媒体");
             session.SetVolume(.25); session.SetMuted(true);
             Check(session.Playback.Volume == .25 && session.Playback.IsMuted, "预览音量与静音独立控制");
@@ -94,8 +134,9 @@ internal sealed class PreviewCheckWindow : Window
             session.SetSinging(true); Check(session.SongId is null && session.Playback.State == MediaPlaybackState.None, "开始演唱结束旧预览");
             await session.StartAsync("three", "演唱中预览", "合成媒体", null, path); session.SetMuted(false);
             Check(session.Playback.IsMuted, "演唱中预览无法解除静音");
-            session.Close(); await Until(() => !capsule.IsOpen);
-            Check(session.SongId is null, "关闭预览停止并收起预览卡");
+            capsule.Open(true); await Until(() => !capsule.IsTransitioning);
+            Invoke(capsule.Transport.StopButton); await Until(() => session.SongId is null && !capsule.IsOpen);
+            Check(session.SongId is null, "单次停止按钮调用清理预览并收起卡片");
         }
         catch (Exception ex) { error = ex.ToString(); }
         finally
