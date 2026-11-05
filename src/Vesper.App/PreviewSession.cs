@@ -23,7 +23,8 @@ internal sealed class PreviewSession : IDisposable
     {
         Playback = new(dispatcher);
         timer.Tick += (_, _) => Changed?.Invoke();
-        Playback.Ended += () => { Ended = true; Changed?.Invoke(); };
+        // Natural completion returns the detail page to its original play entry.
+        Playback.Ended += Close;
         Playback.Failed += message => { Error = message; Loading = false; Changed?.Invoke(); };
     }
     public async Task StartAsync(string id, string title, string artist, ImageSource? cover, string path)
