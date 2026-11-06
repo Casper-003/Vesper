@@ -14,6 +14,10 @@ public sealed partial class SongDetailsView : UserControl
     private readonly MainWindow host;
     private readonly string songId;
     private bool dialogOpen;
+    private readonly PreviewTransport previewTransport = new();
+    private bool coverHovered;
+    internal string PreviewSongId => songId;
+    internal MediaPlayerElement PreviewSurface => PreviewVideo;
     private LibrarySongItem? observedSong;
     private SongEntityLinkState? renderedEntityLinks;
     private readonly Dictionary<Hyperlink, (string Id, bool Album)> entityLinkTargets = [];
@@ -25,6 +29,9 @@ public sealed partial class SongDetailsView : UserControl
     {
         this.host = host; this.songId = songId;
         InitializeComponent();
+        PreviewControls.Content = previewTransport;
+        ActualThemeChanged += (_, _) => PreviewTransport.ApplyGlass(PreviewPlay, ActualTheme);
+        PreviewTransport.ApplyGlass(PreviewPlay, ActualTheme);
         RefreshSong();
     }
 
@@ -54,6 +61,9 @@ public sealed partial class SongDetailsView : UserControl
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        previewTransport.Bind(host.Preview);
+        host.Preview.Changed += RefreshPreview;
+        host.SetPreviewDetails(this, true);
         host.Model.PropertyChanged -= OnLibraryChanged;
         host.Model.PropertyChanged += OnLibraryChanged;
         host.Model.SearchIndexChanged -= OnCatalogChanged;
@@ -64,6 +74,9 @@ public sealed partial class SongDetailsView : UserControl
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
+        host.Preview.Changed -= RefreshPreview;
+        previewTransport.Bind(null);
+        host.SetPreviewDetails(this, false);
         host.Model.PropertyChanged -= OnLibraryChanged;
         host.Model.SearchIndexChanged -= OnCatalogChanged;
         if (observedSong is not null) observedSong.PropertyChanged -= OnSongChanged;
@@ -71,6 +84,22 @@ public sealed partial class SongDetailsView : UserControl
         entityRefreshGeneration++;
         entityRefreshQueued = false;
     }
+    internal void RefreshPreview()
+    {
+        bool active = host.Preview.SongId == songId;
+        PreviewControls.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
+        PreviewVideo.Visibility = active && host.Preview.Playback.VideoWidth > 0 ? Visibility.Visible : Visibility.Collapsed;
+        bool startVisible = !active || host.Preview.Error.Length > 0;
+        PreviewPlay.Opacity = startVisible && (coverHovered || PreviewPlay.FocusState != FocusState.Unfocused) ? 1 : 0;
+        PreviewPlay.IsHitTestVisible = startVisible;
+        PreviewPlay.IsTabStop = startVisible;
+    }
+    private void OnPreviewCoverEntered(object sender, PointerRoutedEventArgs e) { coverHovered = true; RefreshPreview(); }
+    private void OnPreviewCoverExited(object sender, PointerRoutedEventArgs e) { coverHovered = false; RefreshPreview(); }
+    private void OnPreviewPlayFocused(object sender, RoutedEventArgs e) => RefreshPreview();
+    private void OnPreviewPlayBlurred(object sender, RoutedEventArgs e) => RefreshPreview();
+    private async void OnPreviewPlay(object sender, RoutedEventArgs e)
+    { if (Song is { } song) await host.StartPreviewAsync(song); }
     private void OnLibraryChanged(object? sender, PropertyChangedEventArgs e)
     { if (string.IsNullOrEmpty(e.PropertyName) || e.PropertyName == nameof(MainViewModel.LibrarySummary)) QueueEntityRefresh(); }
     private void OnCatalogChanged(object? sender, EventArgs e) => QueueEntityRefresh();
