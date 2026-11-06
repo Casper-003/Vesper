@@ -36,6 +36,7 @@ internal sealed class SingingView : UserControl, IDisposable
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromMilliseconds(200) };
     private readonly CompositeTransform expansion = new();
     private Storyboard? transition;
+    private TaskCompletionSource? transitionCompletion;
     private bool syncing, dragging, keyboardInControls, active, pinned, wasPaused, allowSeek = true;
     private long lastInteraction;
     private string pauseLabel = "";
@@ -189,7 +190,7 @@ internal sealed class SingingView : UserControl, IDisposable
 
     internal void PrepareExpansion(Rect origin, Size hostSize)
     {
-        transition?.Stop();
+        ResetTransition();
         if (!new Windows.UI.ViewManagement.UISettings().AnimationsEnabled) { ResetTransition(); return; }
         expansion.ScaleX = Math.Clamp(origin.Width / Math.Max(1, hostSize.Width), .05, 1);
         expansion.ScaleY = Math.Clamp(origin.Height / Math.Max(1, hostSize.Height), .05, 1);
@@ -208,13 +209,21 @@ internal sealed class SingingView : UserControl, IDisposable
             Storyboard.SetTarget(animation, expansion); Storyboard.SetTargetProperty(animation, pair.Item1); storyboard.Children.Add(animation);
         }
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        transitionCompletion = completion;
         storyboard.Completed += (_, _) => completion.TrySetResult(); storyboard.Begin();
         try { await completion.Task.WaitAsync(TimeSpan.FromSeconds(2)); }
-        finally { ResetTransition(); }
+        finally
+        {
+            // A replaced animation's continuation must not stop its successor.
+            if (ReferenceEquals(transition, storyboard)) ResetTransition();
+        }
     }
     internal void ResetTransition()
     {
         transition?.Stop(); transition = null;
+        // Stopping a Storyboard does not raise Completed. Returning to browsing
+        // still needs to finish presentation so the same player can continue.
+        transitionCompletion?.TrySetResult(); transitionCompletion = null;
         expansion.ScaleX = expansion.ScaleY = 1; expansion.TranslateX = expansion.TranslateY = 0;
     }
     public void Dispose() { timer.Stop(); ResetTransition(); }
