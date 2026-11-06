@@ -54,6 +54,9 @@ public sealed partial class MainWindow : Window
         SetTitleBar(AppTitleBar);
         InitializePreview();
         InitializeSinging(preferences);
+        var monitoring = new MonitoringPanel();
+        AppearanceContent.Children.Add(monitoring);
+        Closed += (_, _) => monitoring.Dispose();
         InitializeHome();
         AppWindow.TitleBar.ButtonBackgroundColor = Colors.Transparent;
         AppWindow.TitleBar.ButtonInactiveBackgroundColor = Colors.Transparent;

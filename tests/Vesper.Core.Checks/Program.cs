@@ -1,6 +1,18 @@
 using Vesper.Core;
 using Vesper.App;
 
+if (args.Contains("--monitoring-checks", StringComparer.Ordinal))
+{
+    int monitoringChecks = 0;
+    MonitoringBufferChecks.Run((passed, description) =>
+    {
+        if (!passed) throw new InvalidOperationException(description);
+        Console.WriteLine("PASS: " + description); monitoringChecks++;
+    });
+    Console.WriteLine($"{monitoringChecks} monitoring checks passed.");
+    return;
+}
+
 if (args.Contains("--search-benchmark", StringComparer.Ordinal))
 {
     SearchChecks.Benchmark();
@@ -114,6 +126,7 @@ try
     await SongDetailsChecks.RunAsync(root, Check);
     ListCoverChecks.Run(Check);
     HomeRecommendationChecks.Run(Check);
+    MonitoringBufferChecks.Run(Check);
     HeroPaletteChecks.Run(Check);
     await CatalogChecks.RunAsync(root, Check);
     AlbumTrackLayoutChecks.Run(Check);
