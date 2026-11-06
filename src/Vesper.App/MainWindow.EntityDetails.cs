@@ -18,9 +18,14 @@ public sealed partial class MainWindow
         entityRefreshTimer.Stop();
         RefreshCurrentEntityDetails();
     };
-    private void RequestEntityRefresh()
+    private void RequestEntityRefresh(bool artistAssetsChanged = false)
     {
         string? key = (ContentFrame.Content as ShellPage)?.PageKey;
+        if (key == "首页")
+        {
+            if (artistAssetsChanged) homeArtistImageRevision++;
+            ScheduleHomeArtwork();
+        }
         if (!closed && key is not null && pageContent.GetValueOrDefault(key) is EntityDetailsView
             && !entityRefreshTimer.IsEnabled) entityRefreshTimer.Start();
     }

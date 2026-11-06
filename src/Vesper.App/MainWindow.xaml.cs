@@ -54,6 +54,7 @@ public sealed partial class MainWindow : Window
         SetTitleBar(AppTitleBar);
         InitializePreview();
         InitializeSinging(preferences);
+        InitializeHome();
         AppWindow.TitleBar.ButtonBackgroundColor = Colors.Transparent;
         AppWindow.TitleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
         AppWindow.Resize(new SizeInt32(1200, 800));
@@ -128,7 +129,11 @@ public sealed partial class MainWindow : Window
             long startupRevision = pagePreparationRevision;
             SetPagePreparationProgress(0, 0, "正在准备曲库…");
             PageLoading.Visibility = Visibility.Visible;
-            try { await viewModel.InitializeAsync(); }
+            try
+            {
+                await viewModel.InitializeAsync();
+                if (!closed && (ContentFrame.Content as ShellPage)?.PageKey == "首页") await PrepareHomeResourcesAsync(metadataCancellation.Token);
+            }
             finally
             {
                 libraryPrepared.TrySetResult();

@@ -113,6 +113,7 @@ try
     await FavoriteChecks.RunAsync(root, Check);
     await SongDetailsChecks.RunAsync(root, Check);
     ListCoverChecks.Run(Check);
+    HomeRecommendationChecks.Run(Check);
     HeroPaletteChecks.Run(Check);
     await CatalogChecks.RunAsync(root, Check);
     AlbumTrackLayoutChecks.Run(Check);

@@ -65,6 +65,7 @@ public sealed partial class MainWindow
         OnOverviewScrollbarIdle();
         viewModel.SetPresentationScrolling(false);
         QueueCurrentVisibleArtwork();
+        QueueHomeArtwork();
         if (pendingMetadataRows.Count > 0) metadataRowsTimer.Start();
     }
     private void QueueVisibleRowMetadata(FrameworkElement row)
