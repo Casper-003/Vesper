@@ -28,6 +28,16 @@ internal static class OnlineArtistProfileChecks
             && uri.Query.Contains("iiurlwidth=512") && uri.Query.Contains("iiurlheight=512")
             && Uri.UnescapeDataString(uri.Query).Contains("Preferred.jpg")),
             "艺人照片选择非弃用的优先 P18 图片，仅请求限尺寸缩略图");
+        handler.ThumbnailHost = "thumb.wikimedia.org";
+        profile = await profiles.GetAsync(new("musicbrainz", "artist", ArtistId));
+        check(profile?.ImageUrl == "https://thumb.wikimedia.org/test/512px-profile.jpg"
+            && ArtworkDiskCache.IsAllowed(new Uri(profile.ImageUrl)) && profile.ImageSourceUrl.Contains("commons.wikimedia.org/wiki/File:"),
+            "Commons 新缩略图 CDN 被资料解析和图片缓存共同接纳，仍保留文件出处");
+        handler.ThumbnailHost = "thumb.wikimedia.org.example.com";
+        profile = await profiles.GetAsync(new("musicbrainz", "artist", ArtistId));
+        check(profile?.ImageUrl == "" && profile.Description == "中文简介",
+            "Commons 返回相似未知域名时拒绝图片，但保留已确认身份与简介");
+        handler.ThumbnailHost = "upload.wikimedia.org";
         var deezer = await profiles.GetAsync(new("deezer", "artist", "42"));
         check(deezer?.ImageUrl == "https://cdn-images.dzcdn.net/artist/500x500.jpg"
             && deezer.SourceUrl == "https://www.deezer.com/artist/42",
@@ -73,6 +83,7 @@ internal static class OnlineArtistProfileChecks
     {
         public List<Uri> Requests { get; } = [];
         public bool MismatchedIdentity, Oversized, NoThumbnail, FailRecording;
+        public string ThumbnailHost = "upload.wikimedia.org";
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var uri = request.RequestUri!; Requests.Add(uri);
@@ -83,7 +94,7 @@ internal static class OnlineArtistProfileChecks
                 "www.wikidata.org" => """{"entities":{"Q123":{"descriptions":{"en":{"value":"English description"},"zh-hans":{"value":"中文简介"}},"claims":{"P18":[{"rank":"deprecated","mainsnak":{"snaktype":"value","datavalue":{"value":"Deprecated.jpg"}}},{"rank":"normal","mainsnak":{"snaktype":"value","datavalue":{"value":"Normal.jpg"}}},{"rank":"preferred","mainsnak":{"snaktype":"value","datavalue":{"value":"Preferred.jpg"}}}]}}}}""",
                 "commons.wikimedia.org" => NoThumbnail
                     ? """{"query":{"pages":[{"imageinfo":[{"url":"https://upload.wikimedia.org/huge-original.jpg"}]}]}}"""
-                    : """{"query":{"pages":[{"imageinfo":[{"thumburl":"https://upload.wikimedia.org/test/512px-profile.jpg","descriptionurl":"https://commons.wikimedia.org/wiki/File:Preferred.jpg"}]}]}}""",
+                    : """{"query":{"pages":[{"imageinfo":[{"thumburl":"https://THUMBNAIL_HOST/test/512px-profile.jpg","descriptionurl":"https://commons.wikimedia.org/wiki/File:Preferred.jpg"}]}]}}""".Replace("THUMBNAIL_HOST", ThumbnailHost),
                 "api.deezer.com" => """{"id":42,"name":"测试歌手","picture_big":"https://cdn-images.dzcdn.net/artist/500x500.jpg"}""",
                 _ when uri.AbsolutePath.Contains("/work/") => $$$$"""{"id":"{{{{WorkId}}}}","relations":[{"target-type":"artist","type":"composer","artist":{"id":"{{{{ComposerId}}}}","name":"测试作曲家"}},{"target-type":"artist","type":"composer","artist":{"id":"{{{{ComposerId}}}}","name":"测试作曲家"}},{"target-type":"artist","type":"lyricist","artist":{"id":"{{{{ArtistId}}}}","name":"测试词作者"}}]}""",
                 _ when uri.AbsolutePath.Contains("/recording/") => $$$$"""{"id":"{{{{RecordingId}}}}","artist-credit":[{"name":"测试歌手","artist":{"id":"{{{{ArtistId}}}}","name":"测试歌手"}}],"relations":[{"target-type":"work","type":"performance","work":{"id":"{{{{WorkId}}}}"}},{"target-type":"work","type":"performance","work":{"id":"{{{{WorkId}}}}"}}]}""",

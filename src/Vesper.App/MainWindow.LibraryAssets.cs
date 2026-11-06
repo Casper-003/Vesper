@@ -31,6 +31,7 @@ public sealed partial class MainWindow
         bool failed = false;
         bool missingArtwork = false;
         bool coverReady = false;
+        bool artistArtworkReady = false;
         DateTimeOffset? creditsCheckedAt = input.Details.Assets?.Key == SongAssetState.Identity(input)
             ? input.Details.Assets.CreditsCheckedAt : null;
         var credits = new List<MusicArtistCredit>();
@@ -61,15 +62,16 @@ public sealed partial class MainWindow
                     try
                     {
                         var profile = await artistProfileClient!.GetAsync(identity, deadline.Token).ConfigureAwait(false);
-                        saved = new(identity, profile, now);
+                        saved = new(identity, profile, now) { ImageLookupVersion = CachedArtistProfile.CurrentImageLookupVersion };
                     }
                     catch (Exception) when (!token.IsCancellationRequested)
-                    { saved = new(identity, saved?.Profile, now, Unavailable: true); }
+                    { saved = new(identity, saved?.Profile, now, Unavailable: true)
+                        { ImageLookupVersion = CachedArtistProfile.CurrentImageLookupVersion }; }
                     profiles.Add(saved);
                 }
                 failed |= saved.Unavailable;
                 if (saved.Profile?.ImageUrl is { Length: > 0 } image)
-                    await CacheImageAsync(image);
+                    artistArtworkReady |= await CacheImageAsync(image);
             }
             if (metadata.CoverUrl.Length > 0)
             {
@@ -94,11 +96,18 @@ public sealed partial class MainWindow
                 published = await viewModel.SaveBackgroundAssetsAsync(ticket.SongId, sourceKey, input, credits, profiles, failed, Current,
                     creditsCheckedAt, missingArtwork);
                 if (published && coverReady) QueueVisibleArtworkForSong(ticket.SongId);
-                if (published && profiles.Count > 0) RequestEntityRefresh();
+                if (published && (profiles.Count > 0 || artistArtworkReady)) RequestEntityRefresh();
             }).ConfigureAwait(false);
-        else if (coverReady)
+        else if (coverReady || artistArtworkReady)
             await DispatchEnrichmentAsync(() =>
-            { if (Current()) QueueVisibleArtworkForSong(ticket.SongId); return Task.CompletedTask; }).ConfigureAwait(false);
+            {
+                if (Current())
+                {
+                    if (coverReady) QueueVisibleArtworkForSong(ticket.SongId);
+                    if (artistArtworkReady) RequestEntityRefresh();
+                }
+                return Task.CompletedTask;
+            }).ConfigureAwait(false);
         return failed || missingArtwork || writeNeeded && !published ? LibraryEnrichmentOutcome.Retry : LibraryEnrichmentOutcome.Completed;
 
         async Task<bool> CacheImageAsync(string value)

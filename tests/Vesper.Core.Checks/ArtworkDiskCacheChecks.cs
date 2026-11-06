@@ -24,6 +24,8 @@ internal static class ArtworkDiskCacheChecks
             && ArtworkDiskCache.IsAllowed(new Uri("https://cdn-images.dzcdn.net/a"))
             && ArtworkDiskCache.IsAllowed(new Uri("https://commons.wikimedia.org/wiki/Special:FilePath/Test.jpg?width=600"))
             && ArtworkDiskCache.IsAllowed(new Uri("https://upload.wikimedia.org/wikipedia/commons/test.jpg"))
+            && ArtworkDiskCache.IsAllowed(new Uri("https://thumb.wikimedia.org/wikipedia/commons/thumb/test.jpg"))
+            && !ArtworkDiskCache.IsAllowed(new Uri("https://thumb.wikimedia.org.example.com/test.jpg"))
             && !ArtworkDiskCache.IsAllowed(new Uri("http://coverartarchive.org/a"))
             && !ArtworkDiskCache.IsAllowed(new Uri("https://coverartarchive.org.example.com/a"))
             && !ArtworkDiskCache.IsAllowed(new Uri("https://example.com/a"))

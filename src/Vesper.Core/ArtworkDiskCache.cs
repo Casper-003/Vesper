@@ -27,6 +27,7 @@ public sealed class ArtworkDiskCache(HttpClient client, string directory, TimePr
             || host.EndsWith(".music.126.net", StringComparison.OrdinalIgnoreCase)
             || host.EndsWith(".dzcdn.net", StringComparison.OrdinalIgnoreCase)
             || host.Equals("commons.wikimedia.org", StringComparison.OrdinalIgnoreCase)
+            || host.Equals("thumb.wikimedia.org", StringComparison.OrdinalIgnoreCase)
             || host.Equals("upload.wikimedia.org", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -71,7 +72,9 @@ public sealed class ArtworkDiskCache(HttpClient client, string directory, TimePr
 
     private async Task<string> DownloadAsync(Uri url, string path, CancellationToken token)
     {
-        using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.UserAgent.ParseAdd("Vesper/0.1 (+https://github.com/Casper-003/Vesper)");
+        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
         if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Gone)
             await SaveMissingAsync(path, response.StatusCode, token).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
