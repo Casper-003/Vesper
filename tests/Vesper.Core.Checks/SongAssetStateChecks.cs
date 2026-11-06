@@ -42,7 +42,7 @@ internal static class SongAssetStateChecks
         var artist = new MusicExternalId("musicbrainz", "artist", "11111111-1111-1111-1111-111111111111");
         var empty = new CachedArtistProfile(artist, null, now);
         var unavailable = empty with { Unavailable = true };
-        var found = empty with { Profile = new("Artist", "Biography", "", "https://musicbrainz.org/artist/" + artist.Value),
+        var found = empty with { Profile = new("Artist", "Biography", "", "https://musicbrainz.org/artist/" + artist.Value) { LogoLookupComplete = true },
             ImageLookupVersion = CachedArtistProfile.CurrentImageLookupVersion };
         check(!empty.ShouldRefresh(now.AddHours(23)) && empty.ShouldRefresh(now.AddDays(1))
             && !unavailable.ShouldRefresh(now.AddSeconds(59)) && unavailable.ShouldRefresh(now.AddMinutes(1))
@@ -54,6 +54,9 @@ internal static class SongAssetStateChecks
             "旧版空图片成功结果升级后重查一次，已升级部分结果及有效图片不反复请求");
         check(!(found with { ImageLookupVersion = 0, Unavailable = true }).ShouldRefresh(now.AddSeconds(59)),
             "空图片升级期间的网络失败仍遵守一分钟冷却");
+        check((found with { Profile = found.Profile! with { LogoLookupComplete = false } }).ShouldRefresh(now)
+            && !found.ShouldRefresh(now.AddDays(1)),
+            "旧艺人资料后台补查一次 Logo，新版查无 Logo 的部分结果沿用三十天冷却");
     }
 
     private static async Task CheckPublicationAndPersistenceAsync(string root, Action<bool, string> check)

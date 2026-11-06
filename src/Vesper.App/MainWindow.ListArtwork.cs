@@ -39,6 +39,9 @@ public sealed partial class MainWindow
 
     private void QueueVisibleArtworkForSong(string songId)
     {
+        foreach (var key in homeArtworkRetries.Keys.Where(key => key.StartsWith(songId + "\n", StringComparison.Ordinal)).ToArray())
+            homeArtworkRetries.Remove(key);
+        ScheduleHomeArtwork();
         foreach (var pair in artworkRows)
         {
             if (!pair.Key.IsLoaded || pair.Value.Song.Song.Id != songId) continue;

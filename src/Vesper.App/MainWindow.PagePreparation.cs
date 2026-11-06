@@ -16,7 +16,7 @@ public sealed partial class MainWindow
         .Any(name => !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(name)));
 
     private bool NeedsPagePreparation(ShellNavigationRequest request) => libraryInitialized && !IsIsolatedUiCheck()
-        && (request.SongId is not null || request.EntityId is not null || request.Key is "曲库" or "收藏");
+        && (request.SongId is not null || request.EntityId is not null || request.Key is "首页" or "曲库" or "收藏");
 
     private void CancelPagePreparation()
     {
@@ -84,6 +84,7 @@ public sealed partial class MainWindow
 
     private async Task PreparePageResourcesAsync(ShellNavigationRequest request, CancellationToken token)
     {
+        if (request.Key == "首页") { await PrepareHomeResourcesAsync(token); return; }
         var songs = new List<LibrarySongItem>();
         CatalogAlbum? album = null;
         CatalogArtist? artist = null;

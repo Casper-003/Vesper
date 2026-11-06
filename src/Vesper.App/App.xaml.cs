@@ -8,6 +8,12 @@ public partial class App : Application
     public App() => InitializeComponent();
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        if (Environment.GetEnvironmentVariable("VESPER_HOME_CHECK_PATH") is { Length: > 0 } homeReport)
+        {
+            window = new HomeCheckWindow(homeReport);
+            window.Activate();
+            return;
+        }
         if (Environment.GetEnvironmentVariable("VESPER_SINGING_CHECK_PATH") is { Length: > 0 } singingReport)
         {
             window = new SingingCheckWindow(singingReport);

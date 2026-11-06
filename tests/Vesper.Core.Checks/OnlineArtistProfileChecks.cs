@@ -38,6 +38,13 @@ internal static class OnlineArtistProfileChecks
         check(profile?.ImageUrl == "" && profile.Description == "中文简介",
             "Commons 返回相似未知域名时拒绝图片，但保留已确认身份与简介");
         handler.ThumbnailHost = "upload.wikimedia.org";
+        handler.WithLogo = true;
+        profile = await profiles.GetAsync(new("musicbrainz", "artist", ArtistId));
+        check(profile?.LogoUrl == "https://upload.wikimedia.org/test/512px-logo.png"
+            && profile.ImageUrl == "https://upload.wikimedia.org/test/512px-profile.jpg"
+            && profile.LogoSourceUrl.Contains("Logo.png"),
+            "艺人 Logo 按已确认身份的 P154 关系单独获取，不替换艺人页照片并保留出处");
+        handler.WithLogo = false;
         var deezer = await profiles.GetAsync(new("deezer", "artist", "42"));
         check(deezer?.ImageUrl == "https://cdn-images.dzcdn.net/artist/500x500.jpg"
             && deezer.SourceUrl == "https://www.deezer.com/artist/42",
@@ -82,7 +89,7 @@ internal static class OnlineArtistProfileChecks
     private sealed class Handler : HttpMessageHandler
     {
         public List<Uri> Requests { get; } = [];
-        public bool MismatchedIdentity, Oversized, NoThumbnail, FailRecording;
+        public bool MismatchedIdentity, Oversized, NoThumbnail, FailRecording, WithLogo;
         public string ThumbnailHost = "upload.wikimedia.org";
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -100,6 +107,14 @@ internal static class OnlineArtistProfileChecks
                 _ when uri.AbsolutePath.Contains("/recording/") => $$$$"""{"id":"{{{{RecordingId}}}}","artist-credit":[{"name":"测试歌手","artist":{"id":"{{{{ArtistId}}}}","name":"测试歌手"}}],"relations":[{"target-type":"work","type":"performance","work":{"id":"{{{{WorkId}}}}"}},{"target-type":"work","type":"performance","work":{"id":"{{{{WorkId}}}}"}}]}""",
                 _ => $$$$"""{"id":"{{{{(MismatchedIdentity ? ComposerId : ArtistId)}}}}","name":"测试歌手","disambiguation":"简短介绍","relations":[{"target-type":"url","type":"wikidata","url":{"resource":"https://www.wikidata.org/wiki/Q123"}}]}"""
             };
+            if (uri.Host == "www.wikidata.org" && WithLogo)
+            {
+                var data = System.Text.Json.Nodes.JsonNode.Parse(body)!;
+                data["entities"]!["Q123"]!["claims"]!["P154"] = System.Text.Json.Nodes.JsonNode.Parse("""[{"rank":"preferred","mainsnak":{"snaktype":"value","datavalue":{"value":"Logo.png"}}}]""");
+                body = data.ToJsonString();
+            }
+            if (uri.Host == "commons.wikimedia.org" && Uri.UnescapeDataString(uri.Query).Contains("File:Logo.png"))
+                body = body.Replace("512px-profile.jpg", "512px-logo.png");
             var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
             if (Oversized) response.Content.Headers.ContentLength = 3 * 1024 * 1024;
             return Task.FromResult(response);

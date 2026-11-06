@@ -11,8 +11,8 @@ public sealed record CachedArtistProfile(MusicExternalId Identity, ArtistProfile
     public const int CurrentImageLookupVersion = 1;
     public int ImageLookupVersion { get; init; }
     public static string Key(MusicExternalId id) => id.Provider.ToLowerInvariant() + ":" + id.Kind + ":" + id.Value;
-    public bool ShouldRefresh(DateTimeOffset now) => !Unavailable && Profile is { ImageUrl.Length: 0 }
-        && ImageLookupVersion < CurrentImageLookupVersion || now - CheckedAt >= (Unavailable ? TimeSpan.FromMinutes(1)
+    public bool ShouldRefresh(DateTimeOffset now) => !Unavailable && (Profile is { LogoLookupComplete: false }
+        || Profile is { ImageUrl.Length: 0 } && ImageLookupVersion < CurrentImageLookupVersion) || now - CheckedAt >= (Unavailable ? TimeSpan.FromMinutes(1)
         : Profile is null ? TimeSpan.FromDays(1) : TimeSpan.FromDays(30));
 }
 

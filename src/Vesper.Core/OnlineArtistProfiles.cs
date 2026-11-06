@@ -6,6 +6,9 @@ namespace Vesper.Core;
 public sealed record ArtistProfile(string Name, string Description, string ImageUrl, string SourceUrl)
 {
     public string ImageSourceUrl { get; init; } = "";
+    public string LogoUrl { get; init; } = "";
+    public string LogoSourceUrl { get; init; } = "";
+    public bool LogoLookupComplete { get; init; }
 }
 
 /// <summary>Fetch a known artist's profile without guessing identities from a display name.</summary>
@@ -35,7 +38,7 @@ public sealed class ArtistProfileClient(HttpClient client, MusicBrainzClient mus
         if (name.Length == 0) return null;
         string description = Limit(MusicBrainzClient.Text(entry, "disambiguation"), 2000);
         string source = "https://musicbrainz.org/artist/" + id;
-        string imageUrl = "", imageSource = "";
+        string imageUrl = "", imageSource = "", logoUrl = "", logoSource = "";
         if (entry.TryGetProperty("relations", out var relations) && relations.ValueKind == JsonValueKind.Array)
         {
             string? wikidataId = relations.EnumerateArray().Where(relation => MusicBrainzClient.Text(relation, "type") == "wikidata"
@@ -65,10 +68,19 @@ public sealed class ArtistProfileClient(HttpClient client, MusicBrainzClient mus
                             (imageUrl, imageSource) = await GetCommonsImageAsync(file, token).ConfigureAwait(false);
                         }
                     }
+                    if (entity.TryGetProperty("claims", out var logoClaims) && logoClaims.TryGetProperty("P154", out var logos)
+                        && logos.ValueKind == JsonValueKind.Array)
+                    {
+                        string logo = logos.EnumerateArray().Where(value => MusicBrainzClient.Text(value, "rank") != "deprecated")
+                            .OrderByDescending(value => MusicBrainzClient.Text(value, "rank") == "preferred")
+                            .Select(ImageFile).FirstOrDefault(value => value.Length > 0) ?? "";
+                        if (logo.Length > 0) (logoUrl, logoSource) = await GetCommonsImageAsync(logo, token).ConfigureAwait(false);
+                    }
                 }
             }
         }
-        return new(name, description, imageUrl, source) { ImageSourceUrl = imageSource };
+        return new(name, description, imageUrl, source) { ImageSourceUrl = imageSource, LogoUrl = logoUrl,
+            LogoSourceUrl = logoSource, LogoLookupComplete = true };
     }
 
     private async Task<ArtistProfile?> GetDeezerAsync(long id, CancellationToken token)
@@ -83,7 +95,7 @@ public sealed class ArtistProfileClient(HttpClient client, MusicBrainzClient mus
         string image = new[] { "picture_big", "picture_medium", "picture" }.Select(key => Https(MusicBrainzClient.Text(entry, key)))
             .FirstOrDefault(value => value.Length > 0) ?? "";
         string source = "https://www.deezer.com/artist/" + id;
-        return new(name, "", image, source) { ImageSourceUrl = source };
+        return new(name, "", image, source) { ImageSourceUrl = source, LogoLookupComplete = true };
     }
 
     private async Task<(string Url, string Source)> GetCommonsImageAsync(string file, CancellationToken token)

@@ -8,7 +8,8 @@ public sealed partial class MainWindow
 {
     private ArtistProfileClient? artistProfileClient;
     private readonly Dictionary<string, BitmapImage> artistImages = [];
-    private string? pendingArtistImage;
+    private readonly Dictionary<string, Task> artistImageLoads = [];
+    private readonly Dictionary<string, DateTimeOffset> artistImageRetries = [];
 
     private async Task<LibraryEnrichmentOutcome> SynchronizeLibraryAssetsAsync(LibraryEnrichmentTicket ticket, string sourceKey)
     {
@@ -72,6 +73,8 @@ public sealed partial class MainWindow
                 failed |= saved.Unavailable;
                 if (saved.Profile?.ImageUrl is { Length: > 0 } image)
                     artistArtworkReady |= await CacheImageAsync(image);
+                if (saved.Profile?.LogoUrl is { Length: > 0 } logo)
+                    artistArtworkReady |= await CacheImageAsync(logo);
             }
             if (metadata.CoverUrl.Length > 0)
             {
@@ -96,7 +99,7 @@ public sealed partial class MainWindow
                 published = await viewModel.SaveBackgroundAssetsAsync(ticket.SongId, sourceKey, input, credits, profiles, failed, Current,
                     creditsCheckedAt, missingArtwork);
                 if (published && coverReady) QueueVisibleArtworkForSong(ticket.SongId);
-                if (published && (profiles.Count > 0 || artistArtworkReady)) RequestEntityRefresh();
+                if (published && (profiles.Count > 0 || artistArtworkReady)) RequestEntityRefresh(artistAssetsChanged: true);
             }).ConfigureAwait(false);
         else if (coverReady || artistArtworkReady)
             await DispatchEnrichmentAsync(() =>
@@ -104,7 +107,7 @@ public sealed partial class MainWindow
                 if (Current())
                 {
                     if (coverReady) QueueVisibleArtworkForSong(ticket.SongId);
-                    if (artistArtworkReady) RequestEntityRefresh();
+                    if (artistArtworkReady) RequestEntityRefresh(artistAssetsChanged: true);
                 }
                 return Task.CompletedTask;
             }).ConfigureAwait(false);
@@ -121,18 +124,37 @@ public sealed partial class MainWindow
         }
     }
 
-    private object? GetArtistImage(CatalogArtist artist)
+    private object? GetArtistImage(CatalogArtist artist, bool preferLogo = false) => GetArtistImage(artist, preferLogo, out _);
+
+    private object? GetArtistImage(CatalogArtist artist, bool preferLogo, out bool isLogo)
     {
-        var profile = artist.ExternalIds.Select(viewModel.GetCachedArtistProfile)
-            .Select(value => value?.Profile).FirstOrDefault(value => value?.ImageUrl.Length > 0);
-        if (profile is null || !Uri.TryCreate(profile.ImageUrl, UriKind.Absolute, out var url) || !ArtworkDiskCache.IsAllowed(url)) return null;
-        string path = artworkCache.GetCachePath(url);
-        if (artistImages.TryGetValue(path, out var image)) return image;
-        if (pendingArtistImage != path) { pendingArtistImage = path; _ = LoadArtistImageAsync(path); }
+        isLogo = false;
+        var profiles = artist.ExternalIds.Select(viewModel.GetCachedArtistProfile).Select(value => value?.Profile).OfType<ArtistProfile>().ToArray();
+        var candidates = (preferLogo ? profiles.Select(profile => (Url: profile.LogoUrl, Logo: true)) : [])
+            .Concat(profiles.Select(profile => (Url: profile.ImageUrl, Logo: false)));
+        bool requested = false;
+        foreach (var candidate in candidates)
+        {
+            if (!Uri.TryCreate(candidate.Url, UriKind.Absolute, out var url) || !ArtworkDiskCache.IsAllowed(url)) continue;
+            string path = artworkCache.GetCachePath(url);
+            if (artistImages.TryGetValue(path, out var image)) { isLogo = candidate.Logo; return image; }
+            if (!requested && (!artistImageRetries.TryGetValue(path, out var retry) || retry <= DateTimeOffset.UtcNow) && File.Exists(path))
+            { requested = true; _ = LoadArtistImageAsync(path); }
+        }
         return null;
     }
 
-    private async Task LoadArtistImageAsync(string path)
+    private Task LoadArtistImageAsync(string path)
+    {
+        if (closed || artistImages.ContainsKey(path)) return Task.CompletedTask;
+        if (artistImageLoads.TryGetValue(path, out var pending)) return pending;
+        var work = ReadArtistImageAsync(path); artistImageLoads[path] = work;
+        _ = ForgetArtistImageAsync(path, work); return work;
+    }
+    private async Task ForgetArtistImageAsync(string path, Task work)
+    { await work; if (artistImageLoads.GetValueOrDefault(path) == work) artistImageLoads.Remove(path); }
+
+    private async Task ReadArtistImageAsync(string path)
     {
         if (closed || artistImages.ContainsKey(path)) return;
         bool entered = false;
@@ -151,13 +173,18 @@ public sealed partial class MainWindow
             RememberArtworkSwatch(image, swatch);
             if (artistImages.Count >= 8) artistImages.Remove(artistImages.Keys.First());
             artistImages[path] = image;
+            artistImageRetries.Remove(path);
             RequestEntityRefresh();
         }
-        catch (Exception) { }
+        catch (Exception)
+        {
+            if (artistImageRetries.Count >= 64) artistImageRetries.Remove(artistImageRetries.Keys.First());
+            artistImageRetries[path] = DateTimeOffset.UtcNow.AddMinutes(1);
+            RequestEntityRefresh();
+        }
         finally
         {
             if (entered) coverSlots.Release();
-            if (pendingArtistImage == path) pendingArtistImage = null;
         }
     }
 }
