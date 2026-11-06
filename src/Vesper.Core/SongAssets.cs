@@ -6,8 +6,13 @@ namespace Vesper.Core;
 
 public sealed record CachedArtistProfile(MusicExternalId Identity, ArtistProfile? Profile, DateTimeOffset CheckedAt, bool Unavailable = false)
 {
+    // v1 accepts the Commons thumbnail CDN. Retry legacy empty-image successes once
+    // without invalidating valid portraits or repeatedly refetching partial results.
+    public const int CurrentImageLookupVersion = 1;
+    public int ImageLookupVersion { get; init; }
     public static string Key(MusicExternalId id) => id.Provider.ToLowerInvariant() + ":" + id.Kind + ":" + id.Value;
-    public bool ShouldRefresh(DateTimeOffset now) => now - CheckedAt >= (Unavailable ? TimeSpan.FromMinutes(1)
+    public bool ShouldRefresh(DateTimeOffset now) => !Unavailable && Profile is { ImageUrl.Length: 0 }
+        && ImageLookupVersion < CurrentImageLookupVersion || now - CheckedAt >= (Unavailable ? TimeSpan.FromMinutes(1)
         : Profile is null ? TimeSpan.FromDays(1) : TimeSpan.FromDays(30));
 }
 

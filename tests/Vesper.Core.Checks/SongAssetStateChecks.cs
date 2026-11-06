@@ -42,11 +42,18 @@ internal static class SongAssetStateChecks
         var artist = new MusicExternalId("musicbrainz", "artist", "11111111-1111-1111-1111-111111111111");
         var empty = new CachedArtistProfile(artist, null, now);
         var unavailable = empty with { Unavailable = true };
-        var found = empty with { Profile = new("Artist", "Biography", "", "https://musicbrainz.org/artist/" + artist.Value) };
+        var found = empty with { Profile = new("Artist", "Biography", "", "https://musicbrainz.org/artist/" + artist.Value),
+            ImageLookupVersion = CachedArtistProfile.CurrentImageLookupVersion };
         check(!empty.ShouldRefresh(now.AddHours(23)) && empty.ShouldRefresh(now.AddDays(1))
             && !unavailable.ShouldRefresh(now.AddSeconds(59)) && unavailable.ShouldRefresh(now.AddMinutes(1))
             && !found.ShouldRefresh(now.AddDays(29)) && found.ShouldRefresh(now.AddDays(30)),
             "作者查无资料、网络失败和成功结果独立保留一天、一分钟和三十天冷却");
+        check((found with { ImageLookupVersion = 0 }).ShouldRefresh(now)
+            && !found.ShouldRefresh(now.AddMinutes(1))
+            && !(found with { ImageLookupVersion = 0, Profile = found.Profile! with { ImageUrl = "https://thumb.wikimedia.org/portrait.jpg" } }).ShouldRefresh(now),
+            "旧版空图片成功结果升级后重查一次，已升级部分结果及有效图片不反复请求");
+        check(!(found with { ImageLookupVersion = 0, Unavailable = true }).ShouldRefresh(now.AddSeconds(59)),
+            "空图片升级期间的网络失败仍遵守一分钟冷却");
     }
 
     private static async Task CheckPublicationAndPersistenceAsync(string root, Action<bool, string> check)

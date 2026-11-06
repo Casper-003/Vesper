@@ -166,7 +166,8 @@ public sealed partial class MainWindow
     private void OnQueueToggle(object sender, RoutedEventArgs args) => SetQueueOpen(!queuePanelOpen);
     private void OnQueueRootKeyDown(object sender, KeyRoutedEventArgs args)
     {
-        if (args.Key != VirtualKey.Escape) return;
+        if (args.Key != VirtualKey.Escape || args.Handled || singingExitPrompt) return;
+        if (singingVisible) { args.Handled = true; ReturnToBrowsing(); return; }
         if (capsule?.IsOpen == true) { capsule.Close(); args.Handled = true; return; }
         if (CancelQueueDrag()) { args.Handled = true; return; }
         if (queuePanelOpen) { SetQueueOpen(false); args.Handled = true; }

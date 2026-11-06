@@ -347,6 +347,8 @@
           <TextBlock Text="曲库" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,20,0,0"/>
           <ToggleSwitch x:Name="HideUnavailableSwitch" Header="隐藏不可用歌曲" OnContent="" OffContent="" IsOn="{Binding HideUnavailable, Mode=TwoWay}" Toggled="OnLibraryPreferenceChanged"/>
           <TextBlock Text="隐藏后仍保留歌曲记录与收藏；重新连接歌曲目录并刷新后即可恢复。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" MaxWidth="520" HorizontalAlignment="Left"/>
+          <TextBlock Text="演唱" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,20,0,0"/>
+          <ToggleSwitch x:Name="SeekDuringSingingSwitch" Header="允许拖动演唱进度" OnContent="可拖动定位" OffContent="仅显示进度" IsOn="True" Toggled="OnSingingSeekPreferenceChanged"/>
         </StackPanel>
         </Grid>
         <StackPanel x:Name="SongFeedbackPanel" Grid.Row="1" VerticalAlignment="Bottom" Spacing="8" Visibility="Collapsed">

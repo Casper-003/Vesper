@@ -97,7 +97,8 @@ public sealed class ArtistProfileClient(HttpClient client, MusicBrainzClient mus
             if (!page.TryGetProperty("imageinfo", out var info) || info.ValueKind != JsonValueKind.Array || info.GetArrayLength() == 0) continue;
             // Do not fall back to an unbounded original photograph when thumbnail generation fails.
             string url = Https(MusicBrainzClient.Text(info[0], "thumburl"));
-            if (Uri.TryCreate(url, UriKind.Absolute, out var image) && image.Host == "upload.wikimedia.org")
+            if (Uri.TryCreate(url, UriKind.Absolute, out var image)
+                && image.Host is "upload.wikimedia.org" or "thumb.wikimedia.org")
                 return (url, "https://commons.wikimedia.org/wiki/File:" + Uri.EscapeDataString(file));
         }
         return ("", "");
