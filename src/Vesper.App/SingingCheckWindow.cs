@@ -21,7 +21,7 @@ internal sealed class SingingCheckWindow : Window
     private readonly PlaybackQueue queue = new();
     private readonly List<Song> songs = [];
     private readonly SingingSession session;
-    private bool started, closed, allowSeek = true;
+    private bool started, closed, allowSeek = true, interruptPresentation;
     private int presentations, seekRequests;
 
     internal SingingCheckWindow(string reportPath)
@@ -36,7 +36,14 @@ internal sealed class SingingCheckWindow : Window
             var size = new Windows.Foundation.Size(view.ActualWidth, view.ActualHeight);
             view.PrepareExpansion(origin, size);
             await view.PresentFrameAsync(session!.FirstFrame);
-            await view.ExpandAsync(origin, size);
+            Task expansion = view.ExpandAsync(origin, size);
+            if (interruptPresentation)
+            {
+                interruptPresentation = false;
+                view.Visibility = Visibility.Collapsed;
+                view.ResetTransition();
+            }
+            await expansion;
         });
         session.Playback.Attach(view.Video);
         session.Changed += Refresh;
@@ -93,12 +100,30 @@ internal sealed class SingingCheckWindow : Window
             songs.Add(new("singing-one", "第一首", [file.Path]));
             songs.Add(new("singing-two", "第二首", [file.Path]));
             queue.Add(songs[0]); queue.Add(songs[1]);
+            interruptPresentation = true;
             await session.NextAsync();
+            Check(session.Ready && !session.Loading && queue.State == PlaybackState.Playing
+                && view.Visibility == Visibility.Collapsed,
+                "首帧展开中返回浏览仍正常开播，不因动画停止超时而退回队首");
+            view.Visibility = Visibility.Visible;
             await Until(() => session.Playback.Position > TimeSpan.FromMilliseconds(200));
             Check(session.Ready && presentations == 1 && session.FirstFrame is { PixelWidth: > 0, PixelHeight: > 0 },
                 "实际解码首帧呈现后开始本地视频，队首成为当前歌曲");
             Check(queue.Current?.SongId == "singing-one" && queue.Pending.Count == 1 && queue.State == PlaybackState.Playing,
                 "开始演唱只消耗队首，待播顺序保留");
+            var animationOrigin = new Windows.Foundation.Rect(300, 54, 420, 150);
+            var animationSize = new Windows.Foundation.Size(view.ActualWidth, view.ActualHeight);
+            Task interruptedExpansion = view.ExpandAsync(animationOrigin, animationSize);
+            view.ResetTransition();
+            await interruptedExpansion.WaitAsync(TimeSpan.FromSeconds(1));
+            Check(session.Ready && queue.Current?.SongId == "singing-one",
+                "展开中返回选歌立即完成呈现等待，不误报超时或退回队首");
+            Task replacedExpansion = view.ExpandAsync(animationOrigin, animationSize);
+            Task latestExpansion = view.ExpandAsync(animationOrigin, animationSize);
+            await replacedExpansion.WaitAsync(TimeSpan.FromSeconds(1));
+            await latestExpansion.WaitAsync(TimeSpan.FromSeconds(1));
+            Check(session.Ready && queue.State == PlaybackState.Playing,
+                "连续展开时旧动画完成不打断新动画或当前播放");
             Check(JsonSerializer.Deserialize<ShellPreferences>("{\"PaneOpen\":true}")!.SingingSeekEnabled,
                 "旧版偏好缺少进度设置时默认允许拖动");
             Invoke(view.Pause);
