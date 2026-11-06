@@ -53,6 +53,8 @@ public sealed partial class MainWindow
         singingEntryBounds = capsule.IsOpen ? capsule.SingingBounds
             : new Rect(Root.ActualWidth / 2 - 100, 0, 200, 48);
         singingEntryRequested = true;
+        await monitoring.ReleaseForPlaybackAsync();
+        if (closed) return;
         capsule.Close();
         if (singing.Ready && !singing.Loading)
         {

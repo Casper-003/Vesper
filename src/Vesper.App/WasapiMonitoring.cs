@@ -4,11 +4,12 @@ using static Vesper.App.WasapiInterop;
 
 namespace Vesper.App;
 
-internal enum MonitoringMode { LowLatency, Compatible, Exclusive }
+internal enum MonitoringMode { LowLatency, Exclusive }
 internal sealed record MonitoringDevice(string Id, string Name) { public override string ToString() => Name; }
-internal sealed record MonitoringInfo(int InputRate, int OutputRate, uint InputPeriod, uint OutputPeriod, bool Raw)
+internal sealed record MonitoringInfo(int InputRate, int OutputRate, uint InputPeriod, uint OutputPeriod, bool Raw, bool Exclusive = false)
 {
-    public override string ToString() => $"返听中 · 输入周期 {InputPeriod * 1000d / InputRate:F1} ms / 输出周期 {OutputPeriod * 1000d / OutputRate:F1} ms（非总延迟）";
+    public override string ToString() => $"返听中 · 输入周期 {InputPeriod * 1000d / InputRate:F1} ms / 输出周期 {OutputPeriod * 1000d / OutputRate:F1} ms（非总延迟）"
+        + (Exclusive ? " · 独占干声返听" : Raw ? " · 即到即送，输出最多排队一个周期" : "");
 }
 
 // COM clients, events, buffers and MMCSS are owned by one dedicated MTA thread.
@@ -27,6 +28,8 @@ internal sealed class WasapiMonitoring : IDisposable
     public Task Finished => finished.Task;
     public long Underruns { get; private set; }
     public long DroppedSamples { get; private set; }
+    public long CaptureDiscontinuities { get; private set; }
+    public long OutputShortages { get; private set; }
     public float Gain { set => Volatile.Write(ref gain, float.IsFinite(value) ? Math.Clamp(value, 0, 1) : 0); }
 
     internal WasapiMonitoring(string inputId, string outputId, MonitoringMode mode, Action<Exception> failed)
@@ -90,9 +93,11 @@ internal sealed class WasapiMonitoring : IDisposable
             Check(client.GetMixFormat(out format));
             int rate = Marshal.ReadInt32(format, 4);
             int periodStatus = client.GetSharedModeEnginePeriod(format, out uint standard, out uint fundamental, out uint min, out uint max);
+            Check(client.GetDevicePeriod(out long deviceDefault, out long deviceMinimum));
             return new { selected.Name, SampleRate = rate, RawSupported = rawStatus >= 0, RawStatus = rawStatus.ToString("X8"),
                 PeriodSupported = periodStatus >= 0, PeriodStatus = periodStatus.ToString("X8"), DefaultFrames = standard,
-                FundamentalFrames = fundamental, MinimumFrames = min, MaximumFrames = max };
+                FundamentalFrames = fundamental, MinimumFrames = min, MaximumFrames = max,
+                DeviceDefaultMilliseconds = deviceDefault / 10000d, DeviceMinimumMilliseconds = deviceMinimum / 10000d };
         }
         finally { if (format != 0) Marshal.FreeCoTaskMem(format); Release(client); Release(device); Release(devices); CoUninitialize(); }
     }
@@ -116,6 +121,11 @@ internal sealed class WasapiMonitoring : IDisposable
                     Options = mode == MonitoringMode.LowLatency ? 1u : 0u }; // Media, RAW via IAudioClient2.
                 Check(Client.SetClientProperties(ref properties));
                 Check(Client.GetMixFormat(out format));
+                if (mode == MonitoringMode.Exclusive)
+                {
+                    nint selected = SelectExclusiveFormat(Client, format);
+                    Marshal.FreeCoTaskMem(format); format = selected;
+                }
                 int tag = (ushort)Marshal.ReadInt16(format); Channels = (ushort)Marshal.ReadInt16(format, 2);
                 Rate = Marshal.ReadInt32(format, 4); Bytes = (ushort)Marshal.ReadInt16(format, 12);
                 Bits = (ushort)Marshal.ReadInt16(format, 14);
@@ -139,11 +149,22 @@ internal sealed class WasapiMonitoring : IDisposable
                 }
                 else
                 {
-                    Check(Client.GetDevicePeriod(out long standard, out _));
-                    Period = (uint)Math.Max(1, standard * Rate / 10000000);
-                    Check(Client.Initialize(0, EventCallback, Math.Max(standard * 3, 300000), 0, format, 0));
+                    Check(Client.GetDevicePeriod(out _, out long minimum));
+                    long duration = Math.Max(1, minimum);
+                    int result = Client.Initialize(1, EventCallback, duration, duration, format, 0);
+                    if (result == unchecked((int)0x88890019)) // AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED
+                    {
+                        Check(Client.GetBufferSize(out uint alignedFrames));
+                        duration = (long)Math.Round(10000000d * alignedFrames / Rate);
+                        Release(activated); activated = null;
+                        Check(device.Activate(ref iid, 23, 0, out value)); Client = activated = (IClient)value;
+                        Check(Client.SetClientProperties(ref properties));
+                        result = Client.Initialize(1, EventCallback, duration, duration, format, 0);
+                    }
+                    Check(result);
                 }
                 Check(Client.GetBufferSize(out Capacity));
+                if (mode == MonitoringMode.Exclusive) Period = Capacity;
                 Check(Client.SetEventHandle(Event.SafeWaitHandle.DangerousGetHandle()));
             }
             catch { Release(activated); Event.Dispose(); throw; }
@@ -181,28 +202,71 @@ internal sealed class WasapiMonitoring : IDisposable
         public void Dispose() { Client.Stop(); Release(Client); Event.Dispose(); }
     }
 
+    internal static object ProbeInitialization(MonitoringDevice? source, MonitoringDevice destination, MonitoringMode selectedMode)
+    {
+        Check(CoInitializeEx(0, 0)); IDevices? devices = null;
+        try
+        {
+            devices = (IDevices)new Enumerator();
+            using var input = source is null ? null : new Endpoint(devices, source.Id, selectedMode);
+            using var output = new Endpoint(devices, destination.Id, selectedMode);
+            return new { Mode = selectedMode.ToString(), Available = input is not null, InputInitialized = input is not null, OutputInitialized = true,
+                InputDevice = source?.Name, OutputDevice = destination.Name,
+                InputRate = input?.Rate, OutputRate = output.Rate, InputFrames = input?.Period, OutputFrames = output.Period,
+                InputMilliseconds = input is null ? (double?)null : input.Period * 1000d / input.Rate, OutputMilliseconds = output.Period * 1000d / output.Rate,
+                OutputBufferCapacity = output.Capacity };
+        }
+        catch (Exception error) { return new { Mode = selectedMode.ToString(), Available = false, Error = error.Message, HResult = error.HResult.ToString("X8") }; }
+        finally { Release(devices); CoUninitialize(); }
+    }
+
+    private static nint SelectExclusiveFormat(IClient client, nint mixFormat)
+    {
+        // Shared mix formats often use float, while USB hardware accepts PCM.
+        int originalRate = Marshal.ReadInt32(mixFormat, 4);
+        int channels = (ushort)Marshal.ReadInt16(mixFormat, 2);
+        foreach (int rate in new[] { originalRate, 48000, 44100 })
+        foreach (int channelCount in new[] { channels, Math.Min(2, channels) }.Distinct())
+        foreach (int bits in new[] { 16, 32, 24 })
+        {
+            nint candidate = Marshal.AllocCoTaskMem(18);
+            for (int b = 0; b < 18; b++) Marshal.WriteByte(candidate, b, 0);
+            int bytes = channelCount * bits / 8;
+            Marshal.WriteInt16(candidate, 1); Marshal.WriteInt16(candidate, 2, (short)channelCount);
+            Marshal.WriteInt32(candidate, 4, rate); Marshal.WriteInt32(candidate, 8, rate * bytes);
+            Marshal.WriteInt16(candidate, 12, (short)bytes); Marshal.WriteInt16(candidate, 14, (short)bits);
+            int result = client.IsFormatSupported(1, candidate, out nint closest);
+            if (closest != 0) Marshal.FreeCoTaskMem(closest);
+            if (result == 0) return candidate;
+            Marshal.FreeCoTaskMem(candidate);
+        }
+        throw new NotSupportedException("设备未提供受支持的独占 PCM 格式，请改用共享低延迟。");
+    }
+
     private void Run()
     {
         IDevices? devices = null; Endpoint? input = null, output = null;
         ICapture? capture = null; IRender? render = null; nint mmcss = 0; bool com = false;
         try
         {
-            if (mode == MonitoringMode.Exclusive) throw new NotSupportedException("独占模式需先接通伴奏与返听统一输出，当前尚未开放。");
             Check(CoInitializeEx(0, 0)); com = true;
             if (stop.WaitOne(0)) throw new OperationCanceledException();
             devices = (IDevices)new Enumerator();
             input = new(devices, inputId, mode); output = new(devices, outputId, mode);
             Guid iid = CaptureId; Check(input.Client.GetService(ref iid, out object service)); capture = (ICapture)service;
             iid = RenderId; Check(output.Client.GetService(ref iid, out service)); render = (IRender)service;
-            int target = Math.Max(2, checked((int)input.Period + (int)Math.Ceiling(output.Period * (double)input.Rate / output.Rate)));
-            var buffer = new MonitoringBuffer(input.Rate, output.Rate, target);
+            bool exclusive = mode == MonitoringMode.Exclusive;
+            int renderInputFrames = checked((int)Math.Ceiling(output.Period * (double)input.Rate / output.Rate));
+            int target = Math.Max(2, exclusive ? (int)input.Period + renderInputFrames : Math.Max((int)input.Period, renderInputFrames));
+            int maximumQueued = exclusive ? target + Math.Max((int)input.Period, renderInputFrames) + input.Rate / 500 : 0;
+            var buffer = new MonitoringBuffer(input.Rate, output.Rate, target, immediate: true, maximumQueuedFrames: maximumQueued);
             WaitHandle[] events = [stop, input.Event, output.Event];
-            Check(render.GetBuffer(output.Capacity, out _)); Check(render.ReleaseBuffer(output.Capacity, 2));
+            bool outputStarted = false;
             if (stop.WaitOne(0)) throw new OperationCanceledException();
             mmcss = AvSetMmThreadCharacteristics("Pro Audio", out _);
-            Check(input.Client.Start()); Check(output.Client.Start());
-            started.TrySetResult(new(input.Rate, output.Rate, input.Period, output.Period, mode == MonitoringMode.LowLatency));
-            float smoothedGain = 0, gainStep = (float)(1 - Math.Exp(-1d / (.005 * output.Rate)));
+            Check(input.Client.Start());
+            var smoother = new MonitoringSignalSmoother(output.Rate);
+            bool outputGap = false;
             int signal;
             while ((signal = WaitHandle.WaitAny(events, 2000)) != 0)
             {
@@ -213,26 +277,80 @@ internal sealed class WasapiMonitoring : IDisposable
                 while (packet > 0 && packets++ < 64)
                 {
                     Check(capture.GetBuffer(out nint data, out uint frames, out uint flags, out _, out _));
-                    try { for (int f = 0; f < frames; f++) buffer.Push((flags & 2) != 0 ? 0 : input.Read(data, f)); }
+                    try
+                    {
+                        if ((flags & 1) != 0)
+                        { if (outputStarted) CaptureDiscontinuities++; buffer.DiscardQueued(); smoother.Discontinuity(); }
+                        for (int f = 0; f < frames; f++) buffer.Push((flags & 2) != 0 ? 0 : input.Read(data, f));
+                    }
                     finally { Check(capture.ReleaseBuffer(frames)); }
                     Check(capture.GetNextPacketSize(out packet));
                     if (stop.WaitOne(0)) break;
                 }
-                Check(output.Client.GetCurrentPadding(out uint padding));
-                uint available = output.Capacity - Math.Min(padding, output.Capacity);
+                // Exclusive event-driven streams must acquire a complete hardware
+                // buffer only on the render event, not on capture wakeups.
+                if (exclusive && outputStarted && signal != 2) continue;
+                uint padding = 0;
+                if (!exclusive) Check(output.Client.GetCurrentPadding(out padding));
+                if (!exclusive && (buffer.Count == 0 || padding >= Math.Min(output.Period, output.Capacity)))
+                {
+                    if (padding == 0 && outputStarted)
+                    { if (!outputGap && signal == 2) OutputShortages++; outputGap = true; }
+                    continue;
+                }
+                long droppedBefore = buffer.DroppedSamples;
+                // Exclusive hardware cannot accept a partial output packet. Keep
+                // one capture-packet reserve so unequal device periods don't cause
+                // periodic gaps; these are the probed small hardware periods.
+                if (exclusive && !outputStarted && buffer.Count < target) continue;
+                buffer.BeginRender();
+                if (outputGap || buffer.DroppedSamples != droppedBefore) { smoother.Discontinuity(); outputGap = false; }
+                if (exclusive && !outputStarted && buffer.AvailableOutputFrames < output.Capacity) continue;
+                uint available = exclusive ? output.Capacity
+                    : MonitoringRenderQueue.FramesToWrite(output.Capacity, padding, output.Period, buffer.AvailableOutputFrames);
                 if (available == 0) continue;
                 Check(render.GetBuffer(available, out nint destination));
                 try
                 {
-                    buffer.BeginRender(); float level = Volatile.Read(ref gain);
+                    float level = Volatile.Read(ref gain);
+                    int sourceFrames = buffer.AvailableOutputFrames;
+                    bool shortage = false;
                     for (int f = 0; f < available; f++)
                     {
-                        smoothedGain += (level - smoothedGain) * gainStep;
-                        output.Write(destination, f, buffer.Read() * smoothedGain);
+                        bool missing = f >= sourceFrames;
+                        shortage |= missing;
+                        if (missing && !outputGap) { smoother.Discontinuity(); outputGap = true; }
+                        output.Write(destination, f, smoother.Process(missing ? 0 : buffer.Read(), level));
                     }
+                    if (shortage) OutputShortages++;
                 }
                 finally { Check(render.ReleaseBuffer(available, 0)); }
+                if (!outputStarted)
+                {
+                    // Start on actual microphone data rather than a full device
+                    // buffer of silence that all later speech would sit behind.
+                    Check(output.Client.Start()); outputStarted = true;
+                    started.TrySetResult(new(input.Rate, output.Rate, input.Period, output.Period, !exclusive, exclusive));
+                }
                 Underruns = buffer.Underruns; DroppedSamples = buffer.DroppedSamples;
+            }
+            if (outputStarted && Volatile.Read(ref disposed) != 0)
+            {
+                // Bounded shutdown on the audio thread. Fade the last live sample
+                // to zero before releasing the device; this is not steady-state buffering.
+                input.Client.Stop(); smoother.Discontinuity();
+                int tails = Math.Clamp((int)Math.Ceiling(output.Rate * .002 / output.Period), 1, 4);
+                for (int block = 0; block < tails && output.Event.WaitOne(50); block++)
+                {
+                    uint queued = 0; if (!exclusive) Check(output.Client.GetCurrentPadding(out queued));
+                    uint frames = exclusive ? output.Capacity
+                        : Math.Min(output.Period, output.Capacity - Math.Min(queued, output.Capacity));
+                    if (frames == 0) continue;
+                    Check(render.GetBuffer(frames, out nint tail));
+                    try { for (int f = 0; f < frames; f++) output.Write(tail, f, smoother.Process(0, 0)); }
+                    finally { Check(render.ReleaseBuffer(frames, 0)); }
+                }
+                output.Event.WaitOne(50);
             }
         }
         catch (Exception error)
@@ -250,6 +368,7 @@ internal sealed class WasapiMonitoring : IDisposable
             {
                 if (mmcss != 0) AvRevertMmThreadCharacteristics(mmcss);
                 if (com) CoUninitialize();
+                started.TrySetCanceled();
                 lock (stop) { finished.TrySetResult(); stop.Dispose(); }
             }
         }

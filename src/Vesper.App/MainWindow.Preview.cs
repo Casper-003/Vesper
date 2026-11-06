@@ -9,6 +9,7 @@ public sealed partial class MainWindow
     private PreviewSession preview = null!;
     private PlaybackCapsule capsule = null!;
     private SongDetailsView? previewDetails;
+    private bool previewEntryRequested;
     internal PreviewSession Preview => preview;
 
     private void InitializePreview()
@@ -31,6 +32,10 @@ public sealed partial class MainWindow
     {
         string? path = song.Song.AvailablePath;
         if (path is null) return;
+        previewEntryRequested = true;
+        try { await monitoring.ReleaseForPlaybackAsync(); }
+        finally { previewEntryRequested = false; }
+        if (closed) return;
         capsule.Close();
         await preview.StartAsync(song.Song.Id, song.Title, song.ArtistDetail, song.Cover as Microsoft.UI.Xaml.Media.ImageSource, path);
     }
