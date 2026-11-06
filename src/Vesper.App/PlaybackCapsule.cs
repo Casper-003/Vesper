@@ -22,6 +22,13 @@ internal sealed class PlaybackCapsule : IDisposable
     private readonly TextBlock title = new() { FontSize = 13, VerticalAlignment = VerticalAlignment.Center };
     private readonly ScrollViewer marquee = new() { HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, HorizontalScrollMode = ScrollMode.Disabled };
     private readonly StackPanel singingPanel = new() { Spacing = 10 };
+    private readonly TextBlock singingTitle = new() { FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
+    private readonly TextBlock singingArtist = new() { FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis };
+    private readonly TextBlock singingStatus = new() { FontSize = 12, TextWrapping = TextWrapping.Wrap };
+    private readonly Image singingCover = new() { Width = 80, Height = 80, Stretch = Stretch.UniformToFill };
+    private readonly Button singingEntry = new() { BorderThickness = new Thickness(0), Padding = new Thickness(14),
+        MinHeight = 150, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+    private string? currentSingingTitle;
     private readonly StackPanel previewPanel = new() { Spacing = 8 };
     private readonly TextBlock songTitle = new() { FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };
     private readonly TextBlock artist = new() { FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis };
@@ -139,10 +146,21 @@ internal sealed class PlaybackCapsule : IDisposable
         previewPanel.Children.Add(heading);
         Transport.ReturnRequested += () => { Close(); ReturnToDetails?.Invoke(); };
         Transport.StopRequested += session.Close;
-        singingPanel.Children.Add(new TextBlock { Text = "演唱", FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        singingPanel.Children.Add(new TextBlock { Text = "演唱播放尚未接入，当前可从歌曲详情开始预览。", TextWrapping = TextWrapping.Wrap });
-        var start = new Button { Content = "开始演唱", IsEnabled = false }; start.Click += (_, _) => BeginSinging?.Invoke(); singingPanel.Children.Add(start);
-        glassButtons.Add(start);
+        var singingHeading = new Grid { ColumnSpacing = 14 };
+        singingHeading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        singingHeading.ColumnDefinitions.Add(new ColumnDefinition());
+        singingHeading.Children.Add(singingCover);
+        var singingInfo = new StackPanel { Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+        singingInfo.Children.Add(singingTitle); singingInfo.Children.Add(singingArtist); singingInfo.Children.Add(singingStatus);
+        Grid.SetColumn(singingInfo, 1); singingHeading.Children.Add(singingInfo);
+        singingEntry.Content = singingHeading;
+        singingEntry.Click += (_, _) => { if (!IsTransitioning) BeginSinging?.Invoke(); };
+        singingCard.Padding = new Thickness(0);
+        singingPanel.Children.Add(singingEntry);
+        foreach (string state in new[] { "ButtonBackground", "ButtonBackgroundPointerOver", "ButtonBackgroundPressed", "ButtonBackgroundDisabled" })
+            singingEntry.Resources[state] = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        singingEntry.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        SetSingingInfo(null, null, null, 0, false, "");
         singingCard.Child = singingPanel; previewCard.Child = previewPanel;
         SettleDeck();
         Transport.Bind(session);
@@ -167,11 +185,12 @@ internal sealed class PlaybackCapsule : IDisposable
     private void OnHostThemeChanged(FrameworkElement sender, object args) => Theme();
     private void Refresh()
     {
-        string label = session.SongId is null ? "🪩" : session.Singing ? $"🪩 返回演唱   ·   🎵 {session.Title}" : $"🎵 {((session.Loading ? "正在准备" : session.Error.Length > 0 ? "预览失败" : session.Ended ? "预览结束" : session.Playback.State == Windows.Media.Playback.MediaPlaybackState.Paused ? "预览已暂停" : "正在听取"))} · {session.Title}";
+        string label = session.SongId is null ? currentSingingTitle is null ? "🪩" : $"🪩 {currentSingingTitle}"
+            : session.Singing ? $"🪩 {currentSingingTitle ?? "返回演唱"}   ·   🎵 {session.Title}" : $"🎵 {((session.Loading ? "正在准备" : session.Error.Length > 0 ? "预览失败" : session.Ended ? "预览结束" : session.Playback.State == Windows.Media.Playback.MediaPlaybackState.Paused ? "预览已暂停" : "正在听取"))} · {session.Title}";
         if (label != title.Text)
         {
-            title.FontSize = session.SongId is null ? 20 : 13;
-            ToolTipService.SetToolTip(Bar, session.SongId is null ? "开始演唱" : "打开播放控制");
+            title.FontSize = session.SongId is null && currentSingingTitle is null ? 20 : 13;
+            ToolTipService.SetToolTip(Bar, session.SongId is null ? currentSingingTitle is null ? "开始演唱" : "返回演唱" : "打开播放控制");
             title.Text = label; marquee.ChangeView(0, null, null, true); marqueeStarted = clock(); ResizeBar();
         }
         songTitle.Text = session.Title; artist.Text = session.Artist; cover.Source = session.Cover;
@@ -184,6 +203,19 @@ internal sealed class PlaybackCapsule : IDisposable
             if (!IsCardSwitching && expanded && morph is null) SettleDeck();
         }
         routeChanged();
+    }
+    internal void SetSingingInfo(string? name, string? artistName, ImageSource? artwork, int pending, bool preparing, string message)
+    {
+        currentSingingTitle = name;
+        singingTitle.Text = name ?? "演唱";
+        singingArtist.Text = artistName ?? "";
+        singingArtist.Visibility = string.IsNullOrEmpty(artistName) ? Visibility.Collapsed : Visibility.Visible;
+        singingCover.Source = artwork; singingCover.Visibility = artwork is null ? Visibility.Collapsed : Visibility.Visible;
+        singingStatus.Text = preparing ? "正在准备演唱…" : message.Length > 0 ? message
+            : name is not null ? "进入演唱" : pending > 0 ? $"待播 {pending} 首 · 点击开始演唱" : "暂无待播歌曲 · 点击进入演唱";
+        singingEntry.IsEnabled = !preparing;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(singingEntry, name is not null ? "返回演唱" : "开始演唱");
+        Refresh();
     }
     internal void Open(bool preview)
     {

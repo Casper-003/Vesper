@@ -53,6 +53,7 @@ public sealed partial class MainWindow : Window
         AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
         SetTitleBar(AppTitleBar);
         InitializePreview();
+        InitializeSinging(preferences);
         AppWindow.TitleBar.ButtonBackgroundColor = Colors.Transparent;
         AppWindow.TitleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
         AppWindow.Resize(new SizeInt32(1200, 800));
@@ -180,7 +181,7 @@ public sealed partial class MainWindow : Window
             Directory.CreateDirectory(Path.GetDirectoryName(preferencesPath)!);
             string temporary = preferencesPath + ".tmp";
             File.WriteAllText(temporary, JsonSerializer.Serialize(new ShellPreferences(Navigation.IsPaneOpen,
-                SystemAccent.IsChecked == true, viewModel.HideUnavailable)));
+                SystemAccent.IsChecked == true, viewModel.HideUnavailable, SeekDuringSingingSwitch.IsOn)));
             File.Move(temporary, preferencesPath, overwrite: true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
