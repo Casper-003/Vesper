@@ -343,7 +343,8 @@
             <primitives:ScrollBar x:Name="FavoriteScrollBar" Margin="1,0" Orientation="Vertical" IndicatorMode="None" IsTabStop="False" AutomationProperties.Name="收藏滚动条"/>
           </Grid>
         </Grid>
-        <StackPanel x:Name="AppearancePanel" Grid.Row="1" Margin="0,28,0,0" Spacing="12" Visibility="Collapsed">
+        <ScrollViewer x:Name="AppearancePanel" Grid.Row="1" Margin="0,28,0,0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Visibility="Collapsed">
+        <StackPanel x:Name="AppearanceContent" Spacing="12" Padding="0,0,24,32">
           <TextBlock Text="强调色" Style="{StaticResource SubtitleTextBlockStyle}"/>
           <RadioButton x:Name="VesperAccent" Content="Vesper（Miku 蓝）" GroupName="Accent" Checked="OnAccentChanged"/>
           <RadioButton x:Name="SystemAccent" Content="跟随 Windows 系统强调色" GroupName="Accent" Checked="OnAccentChanged"/>
@@ -353,6 +354,7 @@
           <TextBlock Text="演唱" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,20,0,0"/>
           <ToggleSwitch x:Name="SeekDuringSingingSwitch" Header="允许拖动演唱进度" OnContent="可拖动定位" OffContent="仅显示进度" IsOn="True" Toggled="OnSingingSeekPreferenceChanged"/>
         </StackPanel>
+        </ScrollViewer>
         </Grid>
         <StackPanel x:Name="SongFeedbackPanel" Grid.Row="1" VerticalAlignment="Bottom" Spacing="8" Visibility="Collapsed">
           <StackPanel x:Name="LibraryFeedback" Orientation="Horizontal" Spacing="8" Visibility="Collapsed">

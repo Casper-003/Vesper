@@ -21,6 +21,7 @@ public sealed partial class MainWindow : Window
     private bool changingSelection;
     private bool closed;
     private bool canSave = true;
+    private MonitoringPanel monitoring = null!;
     private readonly UiResponsivenessTrace? responsivenessTrace;
     private bool themeApplied, appliedDark;
     private Windows.UI.Color appliedAccent;
@@ -54,6 +55,10 @@ public sealed partial class MainWindow : Window
         SetTitleBar(AppTitleBar);
         InitializePreview();
         InitializeSinging(preferences);
+        monitoring = new MonitoringPanel(() => viewModel.Queue.Current is not null || preview.SongId is not null
+            || singingEntryRequested || previewEntryRequested);
+        AppearanceContent.Children.Add(monitoring);
+        Closed += (_, _) => monitoring.Dispose();
         InitializeHome();
         AppWindow.TitleBar.ButtonBackgroundColor = Colors.Transparent;
         AppWindow.TitleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
