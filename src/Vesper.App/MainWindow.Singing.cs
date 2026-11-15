@@ -1,6 +1,12 @@
+using System.Numerics;
+using Microsoft.UI;
+using Microsoft.UI.Composition;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Hosting;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Vesper.Core;
 using Windows.Foundation;
 
@@ -12,9 +18,14 @@ public sealed partial class MainWindow
     private SingingView singingView = null!;
     private readonly DispatcherTimer singingClock = new() { Interval = TimeSpan.FromMilliseconds(200) };
     private bool singingVisible, singingEntryRequested, singingExitPrompt;
-    private int singingPresentationRevision;
+    private int singingPresentationRevision, singingPreviewRevision;
     private AppWindowPresenter? browserPresenter;
     private Rect singingEntryBounds;
+    private Size singingEntryHostSize;
+    private CompositionRoundedRectangleGeometry? singingPreviewClipGeometry;
+    private string? singingPreviewFramePath;
+    private BitmapImage? singingPreviewFrame;
+    private CancellationTokenSource? singingPreviewCancellation;
 
     private void InitializeSinging(ShellPreferences preferences)
     {
@@ -23,10 +34,11 @@ public sealed partial class MainWindow
         singing = new(DispatcherQueue, viewModel.Queue, () => viewModel.Library.Songs.ToArray(), PresentPreparedSingingAsync);
         singing.Playback.Attach(singingView.Video);
         SeekDuringSingingSwitch.IsOn = preferences.SingingSeekEnabled;
+        ConfigureSingingStageButton();
         singing.Changed += RefreshSinging;
         viewModel.Queue.PropertyChanged += OnSingingQueueChanged;
         viewModel.Queue.Pending.CollectionChanged += OnSingingPendingChanged;
-        capsule.BeginSinging += OnEnterSinging;
+        viewModel.PropertyChanged += OnSingingLibraryChanged;
         singingView.StartRequested += OnEnterSinging;
         singingView.ReturnRequested += () => { if (!singingExitPrompt) ReturnToBrowsing(); };
         singingView.PauseRequested += singing.TogglePause;
@@ -40,32 +52,118 @@ public sealed partial class MainWindow
         singingClock.Start();
         Closed += (_, _) =>
         {
-            singingPresentationRevision++; singingClock.Stop(); singing.Dispose(); singingView.Dispose();
+            singingPresentationRevision++; singingPreviewRevision++;
+            singingPreviewCancellation?.Cancel(); singingPreviewCancellation = null;
+            singingClock.Stop(); singing.Dispose(); singingView.Dispose();
             viewModel.Queue.PropertyChanged -= OnSingingQueueChanged;
             viewModel.Queue.Pending.CollectionChanged -= OnSingingPendingChanged;
+            viewModel.PropertyChanged -= OnSingingLibraryChanged;
         };
         RefreshSinging();
+    }
+
+    private void ConfigureSingingStageButton()
+    {
+        foreach (Button button in new[] { SingingStagePlayButton, SingingCollapseButton })
+        {
+            button.Background = SingingView.CreateGlassMaterial();
+            foreach (string state in new[] { "ButtonBackground", "ButtonBackgroundPointerOver", "ButtonBackgroundPressed", "ButtonBackgroundDisabled" })
+                button.Resources[state] = SingingView.CreateGlassMaterial();
+            foreach (string state in new[] { "ButtonBorderBrush", "ButtonBorderBrushPointerOver", "ButtonBorderBrushPressed", "ButtonBorderBrushDisabled" })
+                button.Resources[state] = new SolidColorBrush(Colors.Transparent);
+        }
+        SingingStagePlayButton.PointerEntered += (_, _) => AnimateSingingStageButton(1.06f);
+        SingingStagePlayButton.PointerExited += (_, _) => AnimateSingingStageButton(1f);
+        SingingStagePlayButton.PointerPressed += (_, _) => AnimateSingingStageButton(.94f);
+        SingingStagePlayButton.PointerReleased += (_, _) => AnimateSingingStageButton(1.06f);
+        SingingStagePlayButton.PointerCanceled += (_, _) => AnimateSingingStageButton(1f);
+        SingingStagePlayButton.PointerCaptureLost += (_, _) => AnimateSingingStageButton(1f);
+    }
+
+    private void AnimateSingingStageButton(float scale)
+    {
+        if (closed) return;
+        SingingStagePlayButton.CenterPoint = new Vector3(28, 28, 0);
+        var compositor = ElementCompositionPreview.GetElementVisual(Root).Compositor;
+        var animation = compositor.CreateVector3KeyFrameAnimation();
+        animation.Target = "Scale";
+        animation.InsertExpressionKeyFrame(0, "this.StartingValue");
+        animation.InsertKeyFrame(1, new Vector3(scale));
+        animation.Duration = TimeSpan.FromMilliseconds(120);
+        SingingStagePlayButton.StartAnimation(animation);
+    }
+
+    private void OnSingingPreviewStageSizeChanged(object sender, SizeChangedEventArgs args)
+    {
+        if (closed) return;
+        var visual = ElementCompositionPreview.GetElementVisual(SingingPreviewClip);
+        if (singingPreviewClipGeometry is null)
+        {
+            singingPreviewClipGeometry = visual.Compositor.CreateRoundedRectangleGeometry();
+            singingPreviewClipGeometry.CornerRadius = new Vector2(6);
+            visual.Clip = visual.Compositor.CreateGeometricClip(singingPreviewClipGeometry);
+        }
+        singingPreviewClipGeometry.Size = new Vector2((float)Math.Max(0, args.NewSize.Width), (float)Math.Max(0, args.NewSize.Height));
+    }
+
+    private void OnSingingStagePlayClick(object sender, RoutedEventArgs args) => OnEnterSinging();
+
+    private Rect GetSingingEntryBounds(Size? targetHostSize = null, Size? referenceHostSize = null)
+    {
+        Size currentHost = referenceHostSize ?? new Size(Math.Max(1, Root.ActualWidth), Math.Max(1, Root.ActualHeight));
+        Size host = targetHostSize ?? new Size(Math.Max(1, Root.ActualWidth), Math.Max(1, Root.ActualHeight));
+        FrameworkElement anchor = singingPanelOpen && SingingPreviewStage.ActualWidth > 8 && SingingPreviewStage.ActualHeight > 8
+            ? SingingPreviewStage
+            : SingingShell.ActualWidth > 8 && SingingShell.ActualHeight > 8 ? SingingShell : QueueSidebarSlot;
+        if (anchor.ActualWidth > 8 && anchor.ActualHeight > 8)
+        {
+            Rect bounds = anchor.TransformToVisual(Root).TransformBounds(new Rect(0, 0, anchor.ActualWidth, anchor.ActualHeight));
+            double rightMargin = Math.Max(0, currentHost.Width - bounds.Right);
+            double x = Math.Max(0, host.Width - rightMargin - bounds.Width);
+            return new Rect(x, bounds.Y, bounds.Width, bounds.Height);
+        }
+        return new Rect(Math.Max(0, host.Width - 40), 48, 36, Math.Max(120, host.Height * rightSplitRatio));
     }
 
     private async void OnEnterSinging()
     {
         if (closed || singingExitPrompt || singingEntryRequested) return;
-        singingEntryBounds = capsule.IsOpen ? capsule.SingingBounds
-            : new Rect(Root.ActualWidth / 2 - 100, 0, 200, 48);
+        singingEntryHostSize = new Size(Math.Max(1, Root.ActualWidth), Math.Max(1, Root.ActualHeight));
+        singingEntryBounds = GetSingingEntryBounds(singingEntryHostSize, singingEntryHostSize);
         singingEntryRequested = true;
         await monitoring.ReleaseForPlaybackAsync();
         if (closed) return;
-        capsule.Close();
         if (singing.Ready && !singing.Loading)
         {
             ShowSinging(); singingEntryRequested = false;
             singingView.UpdateTime(singing.Playback.Position, singing.Playback.Duration);
+            await ExpandActiveSingingViewAsync();
         }
         else if (!singing.Loading)
         {
             if (viewModel.Queue.Pending.Count == 0)
-            { ShowSinging(); singingEntryRequested = false; }
+            {
+                ShowSinging(); singingEntryRequested = false;
+                await ExpandActiveSingingViewAsync();
+            }
             else await singing.NextAsync();
+        }
+    }
+
+    private async Task ExpandActiveSingingViewAsync()
+    {
+        if (closed || !singingVisible) return;
+        int request = singingPresentationRevision;
+        Size hostSize = new(Math.Max(1, Root.ActualWidth), Math.Max(1, Root.ActualHeight));
+        Rect origin = GetSingingEntryBounds(hostSize, singingEntryHostSize);
+        singingView.PrepareExpansion(origin, hostSize);
+        try
+        {
+            await singingView.ExpandAsync(origin, hostSize);
+        }
+        finally
+        {
+            if (request == singingPresentationRevision) singingView.ResetTransition();
         }
     }
 
@@ -77,12 +175,16 @@ public sealed partial class MainWindow
         singingEntryRequested = false;
         if (!singingVisible) return; // Automatic next while browsing keeps that page.
         int request = singingPresentationRevision;
-        if (expanding) singingView.PrepareExpansion(singingEntryBounds, new Size(Root.ActualWidth, Root.ActualHeight));
+        Size hostSize = new(Math.Max(1, Root.ActualWidth), Math.Max(1, Root.ActualHeight));
+        Rect origin = GetSingingEntryBounds(hostSize, singingEntryHostSize);
+        if (expanding) singingView.PrepareExpansion(origin, hostSize);
         try
         {
             await singingView.PresentFrameAsync(singing.FirstFrame);
             if (closed || !singingVisible || request != singingPresentationRevision) return;
-            if (expanding) await singingView.ExpandAsync(singingEntryBounds, new Size(Root.ActualWidth, Root.ActualHeight));
+            hostSize = new(Math.Max(1, Root.ActualWidth), Math.Max(1, Root.ActualHeight));
+            origin = GetSingingEntryBounds(hostSize, singingEntryHostSize);
+            if (expanding) await singingView.ExpandAsync(origin, hostSize);
         }
         finally { if (request == singingPresentationRevision) singingView.ResetTransition(); }
     }
@@ -93,24 +195,39 @@ public sealed partial class MainWindow
         singingVisible = true; singingPresentationRevision++;
         browserPresenter = AppWindow.Presenter;
         AppWindow.SetPresenter(AppWindowPresenterKind.FullScreen);
-        capsule.Close(); capsule.Bar.Visibility = Visibility.Collapsed;
         Navigation.IsEnabled = false; BackButton.IsEnabled = ForwardButton.IsEnabled = false;
         singingView.Visibility = Visibility.Visible;
         Root.UpdateLayout(); singingView.SetActive(true); RefreshSinging();
     }
 
-    private void ReturnToBrowsing()
+    private async void ReturnToBrowsing()
     {
-        singingEntryRequested = false; singingPresentationRevision++;
+        singingEntryRequested = false;
+        int request = ++singingPresentationRevision;
         if (!singingVisible || closed) return;
-        singingVisible = false; singingView.SetActive(false); singingView.ResetTransition();
-        singingView.Visibility = Visibility.Collapsed;
+        singingVisible = false;
+        singingView.SetActive(false);
         if (browserPresenter is not null) AppWindow.SetPresenter(browserPresenter);
         browserPresenter = null;
         Navigation.IsEnabled = true; BackButton.IsEnabled = ContentFrame.CanGoBack; ForwardButton.IsEnabled = ContentFrame.CanGoForward;
-        capsule.Bar.Visibility = Visibility.Visible;
-        capsule.Bar.Focus(FocusState.Programmatic);
-        DispatcherQueue.TryEnqueue(UpdateTitleLayout);
+        Root.UpdateLayout();
+        Size hostSize = new(Math.Max(1, Root.ActualWidth), Math.Max(1, Root.ActualHeight));
+        Rect target = GetSingingEntryBounds(hostSize, hostSize);
+        try
+        {
+            await singingView.CollapseAsync(target, hostSize);
+        }
+        finally
+        {
+            if (request == singingPresentationRevision && !singingVisible && !closed)
+            {
+                singingView.ResetTransition();
+                singingView.Visibility = Visibility.Collapsed;
+                if (singingPanelOpen) SingingStagePlayButton.Focus(FocusState.Programmatic);
+                else SingingOpenButton.Focus(FocusState.Programmatic);
+                DispatcherQueue.TryEnqueue(UpdateTitleLayout);
+            }
+        }
         // Keep the same player and video surface attached: no pause, prepare or seek.
     }
 
@@ -143,17 +260,88 @@ public sealed partial class MainWindow
 
     private void OnSingingQueueChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e) => RefreshSinging();
     private void OnSingingPendingChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) => RefreshSinging();
+    private void OnSingingLibraryChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MainViewModel.LibraryHero)) RefreshSinging();
+    }
+
     private void RefreshSinging()
     {
         if (singing is null || closed) return;
         var entry = viewModel.Queue.Current;
-        var song = entry is null ? null : viewModel.FindSong(entry.SongId);
-        capsule.SetSingingInfo(song?.Title ?? entry?.Title, song?.ArtistDetail,
-            song?.Cover as Microsoft.UI.Xaml.Media.ImageSource, viewModel.Queue.Pending.Count, singing.Loading, singing.Message);
+        var nextEntry = entry ?? viewModel.Queue.Pending.FirstOrDefault();
+        var previewSong = nextEntry is null ? null : viewModel.FindSong(nextEntry.SongId);
+        SingingStagePlayGlyph.Visibility = singing.Loading ? Visibility.Collapsed : Visibility.Visible;
+        SingingStageLoadingRing.IsActive = singing.Loading;
+        SingingStageLoadingRing.Visibility = singing.Loading ? Visibility.Visible : Visibility.Collapsed;
+        SingingStagePlayButton.IsEnabled = !singing.Loading;
+        string playLabel = entry is not null ? "返回演唱" : "开始演唱";
+        ToolTipService.SetToolTip(SingingStagePlayButton, playLabel);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(SingingStagePlayButton, playLabel);
+
+        string caption = singing.Message.Length > 0 ? singing.Message : previewSong?.Title ?? nextEntry?.Title ?? "";
+        SingingPreviewCaption.Text = caption;
+        SingingPreviewCaptionBar.Visibility = caption.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        UpdateSingingCardArtwork(entry, previewSong);
+
         singingView.UpdateState(entry is not null, singing.Loading, singing.Ready,
             viewModel.Queue.State == PlaybackState.Paused, viewModel.Queue.Pending.Count, singing.Message, SeekDuringSingingSwitch.IsOn);
         singingView.UpdateTime(singing.Playback.Position, singing.Playback.Duration);
         if (!singing.Loading && !singing.Ready && singing.Message.Length > 0) singingEntryRequested = false;
+    }
+
+    private void UpdateSingingCardArtwork(QueueEntry? currentEntry, LibrarySongItem? previewSong)
+    {
+        if (currentEntry is not null && singing.FirstFrame is not null)
+        {
+            SetSingingPreviewSource(singing.FirstFrame);
+            return;
+        }
+        string? videoPath = previewSong is null ? null : SingingSession.FindVideoPath(previewSong.Song);
+        if (videoPath is not null && string.Equals(singingPreviewFramePath, videoPath, StringComparison.Ordinal) && singingPreviewFrame is not null)
+        {
+            SetSingingPreviewSource(singingPreviewFrame);
+            return;
+        }
+        SetSingingPreviewSource(previewSong?.Cover as ImageSource);
+        if (videoPath is null)
+        {
+            singingPreviewCancellation?.Cancel();
+            singingPreviewCancellation = null;
+            return;
+        }
+        _ = LoadSingingPreviewFrameAsync(videoPath);
+    }
+
+    private void SetSingingPreviewSource(ImageSource? source)
+    {
+        SingingPreviewImage.Source = source;
+        SingingPreviewImage.Visibility = source is null ? Visibility.Collapsed : Visibility.Visible;
+        SingingPreviewPlaceholder.Visibility = source is null ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private async Task LoadSingingPreviewFrameAsync(string videoPath)
+    {
+        int request = ++singingPreviewRevision;
+        singingPreviewCancellation?.Cancel();
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        singingPreviewCancellation = cancellation;
+        try
+        {
+            var frame = await SingingSession.ReadFirstFrameAsync(videoPath, cancellation.Token);
+            if (closed || request != singingPreviewRevision) return;
+            singingPreviewFramePath = videoPath;
+            singingPreviewFrame = frame;
+            SetSingingPreviewSource(frame);
+        }
+        catch
+        {
+            // Keep cover or stage placeholder if video thumbnail decoding fails.
+        }
+        finally
+        {
+            if (ReferenceEquals(singingPreviewCancellation, cancellation)) singingPreviewCancellation = null;
+        }
     }
 
     private void OnSingingSeekPreferenceChanged(object sender, RoutedEventArgs args)

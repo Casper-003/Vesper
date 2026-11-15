@@ -1,29 +1,21 @@
-using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Windows.Media.Playback;
 
 namespace Vesper.App;
 
 public sealed partial class MainWindow
 {
     private PreviewSession preview = null!;
-    private PlaybackCapsule capsule = null!;
     private SongDetailsView? previewDetails;
+    private MediaPlayerElement? backgroundPreviewSurface;
     private bool previewEntryRequested;
     internal PreviewSession Preview => preview;
 
     private void InitializePreview()
     {
         preview = new(DispatcherQueue);
-        capsule = new(Root, preview, WinRT.Interop.WindowNative.GetWindowHandle(this), RoutePreviewSurface);
-        capsule.ReturnToDetails += () =>
-        {
-            if (preview.SongId is { } id) NavigateShell(new ShellNavigationRequest("歌曲详情:" + id, this, id));
-        };
         preview.Changed += RoutePreviewSurface;
         viewModel.Queue.PropertyChanged += OnPreviewQueueStateChanged;
-        capsule.Bar.SizeChanged += (_, _) => UpdateTitleLayout();
-        Closed += (_, _) => { viewModel.Queue.PropertyChanged -= OnPreviewQueueStateChanged; capsule.Dispose(); preview.Dispose(); };
+        Closed += (_, _) => { viewModel.Queue.PropertyChanged -= OnPreviewQueueStateChanged; preview.Dispose(); };
     }
     private void OnPreviewQueueStateChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e) =>
         preview.SetSinging(viewModel.Queue.Current is not null);
@@ -36,20 +28,35 @@ public sealed partial class MainWindow
         try { await monitoring.ReleaseForPlaybackAsync(); }
         finally { previewEntryRequested = false; }
         if (closed) return;
-        capsule.Close();
         await preview.StartAsync(song.Song.Id, song.Title, song.ArtistDetail, song.Cover as Microsoft.UI.Xaml.Media.ImageSource, path);
     }
     internal void SetPreviewDetails(SongDetailsView details, bool loaded)
     {
         if (loaded) previewDetails = details;
-        else if (ReferenceEquals(previewDetails, details)) previewDetails = null;
+        else if (ReferenceEquals(previewDetails, details))
+        {
+            previewDetails = null;
+            if (!preview.BackgroundRetentionEnabled && preview.SongId == details.PreviewSongId)
+                preview.Close();
+        }
         RoutePreviewSurface();
+    }
+    // 预留给后续后台预览入口挂载表面与跳转详情。
+    internal void SetBackgroundPreviewSurface(MediaPlayerElement? surface)
+    {
+        backgroundPreviewSurface = surface;
+        RoutePreviewSurface();
+    }
+    internal void ReturnToPreviewDetails()
+    {
+        if (preview.SongId is { } id) NavigateShell(new ShellNavigationRequest("歌曲详情:" + id, this, id));
     }
     private void RoutePreviewSurface()
     {
-        if (preview is null || capsule is null || closed) return;
-        MediaPlayerElement? surface = capsule.NeedsPreviewSurface ? capsule.Video
-            : previewDetails is { IsLoaded: true } details && details.PreviewSongId == preview.SongId ? details.PreviewSurface : null;
+        if (preview is null || closed) return;
+        MediaPlayerElement? surface = previewDetails is { IsLoaded: true } details && details.PreviewSongId == preview.SongId
+            ? details.PreviewSurface
+            : preview.BackgroundRetentionEnabled ? backgroundPreviewSurface : null;
         preview.Playback.Attach(surface);
         previewDetails?.RefreshPreview();
     }

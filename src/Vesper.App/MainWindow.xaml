@@ -353,6 +353,7 @@
           <TextBlock Text="隐藏后仍保留歌曲记录与收藏；重新连接歌曲目录并刷新后即可恢复。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" MaxWidth="520" HorizontalAlignment="Left"/>
           <TextBlock Text="演唱" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,20,0,0"/>
           <ToggleSwitch x:Name="SeekDuringSingingSwitch" Header="允许拖动演唱进度" OnContent="可拖动定位" OffContent="仅显示进度" IsOn="True" Toggled="OnSingingSeekPreferenceChanged"/>
+          <ToggleSwitch x:Name="LinkRightPanelsSwitch" Header="右侧演唱入口与待播队列联动" OnContent="同时展开" OffContent="单独展开" IsOn="True" Toggled="OnRightPanelModeChanged"/>
         </StackPanel>
         </ScrollViewer>
         </Grid>
@@ -367,28 +368,79 @@
       </Grid>
       </Grid>
       <Grid x:Name="QueueSidebarSlot" Grid.Column="1" SizeChanged="OnQueueSidebarSizeChanged">
-      <Grid x:Name="QueueShell" Margin="4,0,0,0" HorizontalAlignment="Left">
+      <Grid.RowDefinitions>
+        <RowDefinition x:Name="SingingShellRow" Height="0.382*"/>
+        <RowDefinition Height="4"/>
+        <RowDefinition x:Name="QueueShellRow" Height="0.618*"/>
+      </Grid.RowDefinitions>
+      <Grid x:Name="SingingShell" Grid.Row="0" Margin="4,0,0,0" HorizontalAlignment="Right" PointerEntered="OnSingingShellEntered" PointerExited="OnSingingShellExited">
+      <Grid x:Name="SingingShellHover" IsHitTestVisible="False">
+        <Border x:Name="SingingShellChrome" Style="{StaticResource ShellCardStyle}"/>
+      </Grid>
+      <Canvas x:Name="SingingPeekChromeLayer" IsHitTestVisible="False"/>
+      <Grid Margin="1">
+      <Canvas x:Name="SingingCardHost" HorizontalAlignment="Right" Width="0" Opacity="0" Visibility="Collapsed" SizeChanged="OnSingingHostSizeChanged">
+        <Border x:Name="SingingCard" Width="400">
+          <Grid Padding="12">
+            <Border x:Name="SingingPreviewStage" CornerRadius="6" Background="{ThemeResource ControlFillColorSecondaryBrush}" SizeChanged="OnSingingPreviewStageSizeChanged">
+              <Grid x:Name="SingingPreviewClip">
+                <StackPanel x:Name="SingingPreviewPlaceholder" Spacing="8" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False">
+                  <FontIcon Glyph="&#xE720;" FontSize="32" HorizontalAlignment="Center" Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                </StackPanel>
+                <Image x:Name="SingingPreviewImage" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" IsHitTestVisible="False"/>
+                <Border x:Name="SingingPreviewCaptionBar" VerticalAlignment="Bottom" Padding="12,8" IsHitTestVisible="False" Visibility="Collapsed">
+                  <Border.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                      <GradientStop Color="#00000000" Offset="0"/>
+                      <GradientStop Color="#B8000000" Offset="1"/>
+                    </LinearGradientBrush>
+                  </Border.Background>
+                  <TextBlock x:Name="SingingPreviewCaption" FontSize="12" TextTrimming="CharacterEllipsis" Foreground="White"/>
+                </Border>
+                <Button x:Name="SingingStagePlayButton" Width="56" Height="56" Padding="0" CornerRadius="28" BorderThickness="0" HorizontalAlignment="Center" VerticalAlignment="Center" Click="OnSingingStagePlayClick" ToolTipService.ToolTip="开始演唱" AutomationProperties.Name="开始演唱">
+                  <Grid>
+                    <FontIcon x:Name="SingingStagePlayGlyph" Glyph="&#xE768;" FontSize="22" Foreground="White"/>
+                    <ProgressRing x:Name="SingingStageLoadingRing" Width="24" Height="24" IsActive="False" Visibility="Collapsed" Foreground="White"/>
+                  </Grid>
+                </Button>
+                <Button x:Name="SingingCollapseButton" Width="32" Height="32" Margin="6" Padding="0" CornerRadius="{ThemeResource ControlCornerRadius}" BorderThickness="0" HorizontalAlignment="Left" VerticalAlignment="Top" Opacity="0" Click="OnSingingRailToggle" GotFocus="OnRightPanelCollapseFocusChanged" LostFocus="OnRightPanelCollapseFocusChanged" ToolTipService.ToolTip="收起演唱入口" AutomationProperties.Name="收起演唱入口">
+                  <FontIcon Glyph="&#xE76C;" FontSize="14" Foreground="White"/>
+                </Button>
+              </Grid>
+            </Border>
+          </Grid>
+        </Border>
+      </Canvas>
+      <Grid x:Name="SingingRailHost" Width="34" HorizontalAlignment="Right">
+      <Button x:Name="SingingOpenButton" VerticalAlignment="Stretch" HorizontalAlignment="Left" Width="38" Margin="-4,0,0,0" Padding="0" BorderThickness="0" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Click="OnSingingRailToggle" PointerEntered="OnSingingRailEntered" PointerExited="OnSingingRailExited" PointerPressed="OnSingingRailPressed" PointerReleased="OnSingingRailReleased" PointerCanceled="OnSingingRailReleased" PointerCaptureLost="OnSingingRailReleased" GotFocus="OnRightRailFocusChanged" LostFocus="OnRightRailFocusChanged" Style="{StaticResource QueueRailStyle}" ToolTipService.ToolTip="展开演唱入口" AutomationProperties.Name="展开演唱入口">
+        <Grid x:Name="SingingToggleContent" Width="34" Height="72"><FontIcon x:Name="SingingToggleChevron" Glyph="&#xE76B;" FontSize="16" VerticalAlignment="Center" Opacity="0"/></Grid>
+      </Button>
+      </Grid>
+      </Grid>
+      </Grid>
+      <local:RightSidebarSplitterGrip x:Name="RightSidebarSplitter" Grid.Row="1" Margin="4,-1,0,-1" Height="6" HorizontalAlignment="Stretch" VerticalAlignment="Center" Canvas.ZIndex="5" Background="Transparent" PointerPressed="OnRightSplitterPressed" PointerMoved="OnRightSplitterMoved" PointerReleased="OnRightSplitterReleased" PointerCanceled="OnRightSplitterCanceled" PointerCaptureLost="OnRightSplitterCaptureLost" ToolTipService.ToolTip="上下拖动调整高度比例"/>
+      <Grid x:Name="QueueShell" Grid.Row="2" Margin="4,0,0,0" HorizontalAlignment="Right" PointerEntered="OnQueueShellEntered" PointerExited="OnQueueShellExited">
       <Grid x:Name="QueueShellHover" IsHitTestVisible="False">
         <Border x:Name="QueueShellChrome" Style="{StaticResource ShellCardStyle}"/>
       </Grid>
       <Canvas x:Name="QueuePeekChromeLayer" IsHitTestVisible="False"/>
       <Grid Margin="1">
-      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-      <Canvas x:Name="QueueCardHost" Grid.Column="1" Width="0" Visibility="Collapsed" SizeChanged="OnQueueHostSizeChanged">
+      <Canvas x:Name="QueueCardHost" HorizontalAlignment="Right" Width="0" Opacity="0" Visibility="Collapsed" SizeChanged="OnQueueHostSizeChanged">
         <Border x:Name="QueueCard" Width="400">
-          <Grid Padding="12" RowSpacing="12">
+          <Grid Padding="12,12,0,12" RowSpacing="12">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-            <Grid x:Name="QueueHeading" Margin="0,0,34,0" ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-              <TextBlock Text="待播曲目" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
-              <TextBlock x:Name="QueueHeadingCount" Grid.Column="1" FontSize="12" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+            <Grid x:Name="QueueHeading" Margin="0,0,12,0" MinHeight="32">
+              <TextBlock Text="待播曲目" FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              <TextBlock x:Name="QueueHeadingCount" FontSize="12" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+              <Button x:Name="QueueCollapseButton" Width="32" Height="32" Padding="0" HorizontalAlignment="Left" VerticalAlignment="Center" Opacity="0" Click="OnQueueToggle" GotFocus="OnRightPanelCollapseFocusChanged" LostFocus="OnRightPanelCollapseFocusChanged" Style="{StaticResource SubtleButtonStyle}" ToolTipService.ToolTip="收起待播曲目" AutomationProperties.Name="收起待播曲目"><FontIcon Glyph="&#xE76C;" FontSize="14"/></Button>
             </Grid>
-            <StackPanel x:Name="QueueCurrentArea" Grid.Row="1" Margin="0,0,34,0" Visibility="Collapsed" Spacing="4">
+            <StackPanel x:Name="QueueCurrentArea" Grid.Row="1" Margin="0,0,12,0" Visibility="Collapsed" Spacing="4">
               <Grid><TextBlock Text="正在演唱" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/><TextBlock x:Name="QueueCurrentState" HorizontalAlignment="Right" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/></Grid>
               <ContentControl x:Name="QueueCurrentContent" HorizontalContentAlignment="Stretch" ContentTemplate="{StaticResource QueueRowTemplate}"/>
             </StackPanel>
             <Grid Grid.Row="2">
-              <ListView x:Name="QueueSongs" Padding="0,0,34,0" SelectionMode="None" HorizontalContentAlignment="Stretch" ItemContainerStyle="{StaticResource SongRowStyle}" ItemTemplate="{StaticResource QueueRowTemplate}" ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled" PointerMoved="OnQueueDragPointerMoved" PointerReleased="OnQueueDragPointerReleased" PointerCanceled="OnQueueDragPointerCanceled" PointerCaptureLost="OnQueueDragPointerCaptureLost"><ListView.ItemContainerTransitions><TransitionCollection/></ListView.ItemContainerTransitions></ListView>
-              <ScrollViewer x:Name="QueueEmpty" Margin="12,12,46,12" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center">
+              <ListView x:Name="QueueSongs" Padding="0,0,12,0" SelectionMode="None" HorizontalContentAlignment="Stretch" ItemContainerStyle="{StaticResource SongRowStyle}" ItemTemplate="{StaticResource QueueRowTemplate}" ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled" PointerMoved="OnQueueDragPointerMoved" PointerReleased="OnQueueDragPointerReleased" PointerCanceled="OnQueueDragPointerCanceled" PointerCaptureLost="OnQueueDragPointerCaptureLost"><ListView.ItemContainerTransitions><TransitionCollection/></ListView.ItemContainerTransitions></ListView>
+              <ScrollViewer x:Name="QueueEmpty" Margin="12,12,24,12" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Center">
                 <StackPanel MaxWidth="280" Spacing="8" Margin="0,12" HorizontalAlignment="Left">
                   <FontIcon Glyph="&#xE8EF;" FontSize="36" Margin="0,0,0,8" HorizontalAlignment="Left" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                   <TextBlock x:Name="QueueEmptyTitle" Text="暂无待播" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap" TextAlignment="Left"/>
@@ -399,9 +451,9 @@
           </Grid>
         </Border>
       </Canvas>
-      <Grid x:Name="QueueRailHost" Width="34">
-      <Button x:Name="QueueOpenButton" VerticalAlignment="Stretch" HorizontalAlignment="Left" Width="38" Margin="-4,0,0,0" Padding="0" BorderThickness="0" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Click="OnQueueToggle" PointerEntered="OnQueueRailEntered" PointerExited="OnQueueRailExited" PointerPressed="OnQueueRailPressed" PointerReleased="OnQueueRailReleased" PointerCanceled="OnQueueRailReleased" PointerCaptureLost="OnQueueRailReleased" Style="{StaticResource QueueRailStyle}" ToolTipService.ToolTip="待播曲目" AutomationProperties.Name="展开待播曲目">
-        <Grid x:Name="QueueToggleContent" Width="34" Height="72"><FontIcon x:Name="QueueToggleChevron" Glyph="&#xE76B;" FontSize="16" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5"><FontIcon.RenderTransform><RotateTransform x:Name="QueueChevronRotation"/></FontIcon.RenderTransform></FontIcon><TextBlock x:Name="QueueBadge" Text="0" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Bottom"/></Grid>
+      <Grid x:Name="QueueRailHost" Width="34" HorizontalAlignment="Right">
+      <Button x:Name="QueueOpenButton" VerticalAlignment="Stretch" HorizontalAlignment="Left" Width="38" Margin="-4,0,0,0" Padding="0" BorderThickness="0" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Click="OnQueueToggle" PointerEntered="OnQueueRailEntered" PointerExited="OnQueueRailExited" PointerPressed="OnQueueRailPressed" PointerReleased="OnQueueRailReleased" PointerCanceled="OnQueueRailReleased" PointerCaptureLost="OnQueueRailReleased" GotFocus="OnRightRailFocusChanged" LostFocus="OnRightRailFocusChanged" Style="{StaticResource QueueRailStyle}" ToolTipService.ToolTip="待播曲目" AutomationProperties.Name="展开待播曲目">
+        <Grid x:Name="QueueToggleContent" Width="34" Height="72"><FontIcon x:Name="QueueToggleChevron" Glyph="&#xE76B;" FontSize="16" VerticalAlignment="Center" Opacity="0"/></Grid>
       </Button>
       </Grid>
       </Grid>

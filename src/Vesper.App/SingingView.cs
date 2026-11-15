@@ -107,6 +107,8 @@ internal sealed class SingingView : UserControl, IDisposable
         }
     }
 
+    internal static AcrylicBrush CreateGlassMaterial() => Material();
+
     private static AcrylicBrush Material() => new()
     {
         TintColor = Windows.UI.Color.FromArgb(255, 28, 28, 32), TintOpacity = .35,
@@ -192,6 +194,8 @@ internal sealed class SingingView : UserControl, IDisposable
     {
         ResetTransition();
         if (!new Windows.UI.ViewManagement.UISettings().AnimationsEnabled) { ResetTransition(); return; }
+        layout.CornerRadius = new CornerRadius(10);
+        Opacity = .28;
         expansion.ScaleX = Math.Clamp(origin.Width / Math.Max(1, hostSize.Width), .05, 1);
         expansion.ScaleY = Math.Clamp(origin.Height / Math.Max(1, hostSize.Height), .05, 1);
         expansion.TranslateX = origin.X + origin.Width / 2 - hostSize.Width / 2;
@@ -204,10 +208,16 @@ internal sealed class SingingView : UserControl, IDisposable
         var storyboard = new Storyboard(); transition = storyboard;
         foreach (var pair in new[] { ("ScaleX", 1d), ("ScaleY", 1d), ("TranslateX", 0d), ("TranslateY", 0d) })
         {
-            var animation = new DoubleAnimation { To = pair.Item2, Duration = TimeSpan.FromMilliseconds(260),
+            var animation = new DoubleAnimation { To = pair.Item2, Duration = TimeSpan.FromMilliseconds(280),
                 EnableDependentAnimation = true, EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
             Storyboard.SetTarget(animation, expansion); Storyboard.SetTargetProperty(animation, pair.Item1); storyboard.Children.Add(animation);
         }
+        var fade = new DoubleAnimation
+        {
+            To = 1d, Duration = TimeSpan.FromMilliseconds(220),
+            EnableDependentAnimation = true, EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        Storyboard.SetTarget(fade, this); Storyboard.SetTargetProperty(fade, nameof(Opacity)); storyboard.Children.Add(fade);
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         transitionCompletion = completion;
         storyboard.Completed += (_, _) => completion.TrySetResult(); storyboard.Begin();
@@ -218,6 +228,40 @@ internal sealed class SingingView : UserControl, IDisposable
             if (ReferenceEquals(transition, storyboard)) ResetTransition();
         }
     }
+    internal async Task CollapseAsync(Rect target, Size hostSize)
+    {
+        ResetTransition();
+        if (!new Windows.UI.ViewManagement.UISettings().AnimationsEnabled) return;
+        layout.CornerRadius = new CornerRadius(10);
+        double scaleX = Math.Clamp(target.Width / Math.Max(1, hostSize.Width), .05, 1);
+        double scaleY = Math.Clamp(target.Height / Math.Max(1, hostSize.Height), .05, 1);
+        double translateX = target.X + target.Width / 2 - hostSize.Width / 2;
+        double translateY = target.Y + target.Height / 2 - hostSize.Height / 2;
+        var storyboard = new Storyboard(); transition = storyboard;
+        foreach (var pair in new[] { ("ScaleX", scaleX), ("ScaleY", scaleY), ("TranslateX", translateX), ("TranslateY", translateY) })
+        {
+            var animation = new DoubleAnimation
+            {
+                To = pair.Item2, Duration = TimeSpan.FromMilliseconds(250),
+                EnableDependentAnimation = true, EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut }
+            };
+            Storyboard.SetTarget(animation, expansion); Storyboard.SetTargetProperty(animation, pair.Item1); storyboard.Children.Add(animation);
+        }
+        var fade = new DoubleAnimation
+        {
+            To = 0d, Duration = TimeSpan.FromMilliseconds(240),
+            EnableDependentAnimation = true, EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
+        };
+        Storyboard.SetTarget(fade, this); Storyboard.SetTargetProperty(fade, nameof(Opacity)); storyboard.Children.Add(fade);
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        transitionCompletion = completion;
+        storyboard.Completed += (_, _) => completion.TrySetResult(); storyboard.Begin();
+        try { await completion.Task.WaitAsync(TimeSpan.FromSeconds(2)); }
+        finally
+        {
+            if (ReferenceEquals(transition, storyboard)) ResetTransition();
+        }
+    }
     internal void ResetTransition()
     {
         transition?.Stop(); transition = null;
@@ -225,6 +269,7 @@ internal sealed class SingingView : UserControl, IDisposable
         // still needs to finish presentation so the same player can continue.
         transitionCompletion?.TrySetResult(); transitionCompletion = null;
         expansion.ScaleX = expansion.ScaleY = 1; expansion.TranslateX = expansion.TranslateY = 0;
+        Opacity = 1; layout.CornerRadius = new CornerRadius(0);
     }
     public void Dispose() { timer.Stop(); ResetTransition(); }
 }

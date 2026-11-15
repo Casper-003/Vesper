@@ -12,20 +12,21 @@ public sealed partial class MainWindow
 {
     private sealed record QueuePeekChrome(ShapeVisual Visual, CompositionRoundedRectangleGeometry FillGeometry,
         CompositionRoundedRectangleGeometry StrokeGeometry, CompositionColorBrush FillBrush, CompositionColorBrush StrokeBrush);
-    private QueuePeekChrome? queueBrowserPeekChrome, queuePanelPeekChrome;
+    private QueuePeekChrome? queueBrowserPeekChrome, singingPanelPeekChrome, queuePanelPeekChrome;
     private CompositionPropertySet? queueRailPeekState;
-    private ExpressionAnimation? queuePeekContentTranslation;
+    private ExpressionAnimation? singingPeekContentTranslation, queuePeekContentTranslation;
     private bool queuePeekContentTranslationRunning, queueRailPeekActive, queueRailPeekTarget;
     private int queueRailPeekRevision;
     private float queueRailPeekAmount;
-    private Vector2 queuePeekBrowserSize, queuePeekPanelSize, queuePeekContentSize;
-    private float queuePeekBrowserFillInset, queuePeekPanelFillInset;
-    private double queuePeekBrowserOpacity, queuePeekPanelOpacity;
+    private Vector2 queuePeekBrowserSize, singingPeekPanelSize, queuePeekPanelSize, queuePeekContentSize;
+    private float queuePeekBrowserFillInset, singingPeekPanelFillInset, queuePeekPanelFillInset;
+    private double queuePeekBrowserOpacity, singingPeekPanelOpacity, queuePeekPanelOpacity;
 
     private void InitializeQueueRailPeek()
     {
         // The wider, constant hit area is centered two units left of the 34-unit
         // rail. Only the content's facade translation compensates that difference.
+        SingingToggleContent.Translation = new Vector3(2, 0, 0);
         QueueToggleContent.Translation = new Vector3(2, 0, 0);
         Root.SizeChanged += OnQueuePeekRootSizeChanged;
         Root.ActualThemeChanged += OnQueuePeekThemeChanged;
@@ -55,7 +56,7 @@ public sealed partial class MainWindow
     private void AnimateQueueRailPeek(bool peek)
     {
         if (closed) return;
-        peek = peek && queueSidebarVisible && !queueSidebarAnimating && !queuePanelOpen && !queueLayoutAnimating;
+        peek = peek && queueSidebarVisible && !queueSidebarAnimating && !singingPanelOpen && !queuePanelOpen && !queueLayoutAnimating;
         if (!queueRailPeekActive)
         {
             if (!peek || !PrepareQueueRailPeek()) return;
@@ -87,35 +88,45 @@ public sealed partial class MainWindow
 
     private bool PrepareQueueRailPeek()
     {
-        if (browserContentClipGeometry is null || BrowserCardChrome.ActualWidth <= 8 || QueueShellChrome.ActualWidth <= 8) return false;
+        if (browserContentClipGeometry is null || BrowserCardChrome.ActualWidth <= 8 || SingingShellChrome.ActualWidth <= 8 || QueueShellChrome.ActualWidth <= 8) return false;
         if (!TryQueuePeekBrushColor(BrowserCardChrome.Background, out var browserFill)
             || !TryQueuePeekBrushColor(BrowserCardChrome.BorderBrush, out var browserStroke)
+            || !TryQueuePeekBrushColor(SingingShellChrome.Background, out var singingFill)
+            || !TryQueuePeekBrushColor(SingingShellChrome.BorderBrush, out var singingStroke)
             || !TryQueuePeekBrushColor(QueueShellChrome.Background, out var queueFill)
             || !TryQueuePeekBrushColor(QueueShellChrome.BorderBrush, out var queueStroke)) return false;
         var compositor = ElementCompositionPreview.GetElementVisual(Root).Compositor;
         queueRailPeekState ??= compositor.CreatePropertySet();
         queueBrowserPeekChrome ??= CreateQueuePeekChrome(compositor, BrowserPeekChromeLayer);
+        singingPanelPeekChrome ??= CreateQueuePeekChrome(compositor, SingingPeekChromeLayer);
         queuePanelPeekChrome ??= CreateQueuePeekChrome(compositor, QueuePeekChromeLayer);
         queuePeekBrowserSize = new((float)BrowserCardChrome.ActualWidth, (float)BrowserCardChrome.ActualHeight);
+        singingPeekPanelSize = new((float)SingingShellChrome.ActualWidth, (float)SingingShellChrome.ActualHeight);
         queuePeekPanelSize = new((float)QueueShellChrome.ActualWidth, (float)QueueShellChrome.ActualHeight);
         queuePeekContentSize = new((float)BrowserContentClip.ActualWidth, (float)BrowserContentClip.ActualHeight);
         queuePeekBrowserFillInset = BrowserCardChrome.BackgroundSizing == BackgroundSizing.InnerBorderEdge ? 1 : 0;
+        singingPeekPanelFillInset = SingingShellChrome.BackgroundSizing == BackgroundSizing.InnerBorderEdge ? 1 : 0;
         queuePeekPanelFillInset = QueueShellChrome.BackgroundSizing == BackgroundSizing.InnerBorderEdge ? 1 : 0;
         queuePeekBrowserOpacity = BrowserCardChrome.Opacity;
+        singingPeekPanelOpacity = SingingShellChrome.Opacity;
         queuePeekPanelOpacity = QueueShellChrome.Opacity;
         queueRailPeekState.InsertScalar("Amount", 0);
         queueRailPeekState.InsertVector2("BrowserSize", queuePeekBrowserSize);
+        queueRailPeekState.InsertVector2("SingingSize", singingPeekPanelSize);
         queueRailPeekState.InsertVector2("PanelSize", queuePeekPanelSize);
         queueRailPeekState.InsertVector2("ContentSize", queuePeekContentSize);
         queueBrowserPeekChrome.FillBrush.Color = browserFill; queueBrowserPeekChrome.StrokeBrush.Color = browserStroke;
+        singingPanelPeekChrome.FillBrush.Color = singingFill; singingPanelPeekChrome.StrokeBrush.Color = singingStroke;
         queuePanelPeekChrome.FillBrush.Color = queueFill; queuePanelPeekChrome.StrokeBrush.Color = queueStroke;
         queueBrowserPeekChrome.Visual.Size = queuePeekBrowserSize + new Vector2(4, 0);
+        singingPanelPeekChrome.Visual.Size = singingPeekPanelSize + new Vector2(4, 0);
         queuePanelPeekChrome.Visual.Size = queuePeekPanelSize + new Vector2(4, 0);
         queueRailPeekActive = true;
         MaterializeQueueRailPeek(0);
         queueBrowserPeekChrome.Visual.Opacity = (float)queuePeekBrowserOpacity;
+        singingPanelPeekChrome.Visual.Opacity = (float)singingPeekPanelOpacity;
         queuePanelPeekChrome.Visual.Opacity = (float)queuePeekPanelOpacity;
-        BrowserCardChrome.Opacity = QueueShellChrome.Opacity = 0;
+        BrowserCardChrome.Opacity = SingingShellChrome.Opacity = QueueShellChrome.Opacity = 0;
         return true;
     }
 
@@ -162,8 +173,12 @@ public sealed partial class MainWindow
     private void BindQueuePeekExpressions()
     {
         BindQueuePeekChrome(queueBrowserPeekChrome!, "BrowserSize", false, queuePeekBrowserFillInset);
+        BindQueuePeekChrome(singingPanelPeekChrome!, "SingingSize", true, singingPeekPanelFillInset);
         BindQueuePeekChrome(queuePanelPeekChrome!, "PanelSize", true, queuePeekPanelFillInset);
         browserContentClipGeometry!.StartAnimation("Size", QueuePeekExpression("Vector2(Max(0, hint.ContentSize.X - hint.Amount), hint.ContentSize.Y)"));
+        singingPeekContentTranslation ??= QueuePeekExpression("Vector3(2 - hint.Amount * 0.5, 0, 0)");
+        singingPeekContentTranslation.Target = "Translation";
+        SingingToggleContent.StartAnimation(singingPeekContentTranslation);
         queuePeekContentTranslation ??= QueuePeekExpression("Vector3(2 - hint.Amount * 0.5, 0, 0)");
         queuePeekContentTranslation.Target = "Translation";
         QueueToggleContent.StartAnimation(queuePeekContentTranslation);
@@ -187,15 +202,18 @@ public sealed partial class MainWindow
     {
         queueRailPeekAmount = amount;
         SetQueuePeekChrome(queueBrowserPeekChrome!, queuePeekBrowserSize, amount, false, queuePeekBrowserFillInset);
+        SetQueuePeekChrome(singingPanelPeekChrome!, singingPeekPanelSize, amount, true, singingPeekPanelFillInset);
         SetQueuePeekChrome(queuePanelPeekChrome!, queuePeekPanelSize, amount, true, queuePeekPanelFillInset);
         if (browserContentClipGeometry is not null)
         {
             browserContentClipGeometry.Size = new Vector2(Math.Max(0, queuePeekContentSize.X - amount), queuePeekContentSize.Y);
             browserContentClipGeometry.StopAnimation("Size");
         }
+        SingingToggleContent.Translation = new Vector3(2 - amount * .5f, 0, 0);
         QueueToggleContent.Translation = new Vector3(2 - amount * .5f, 0, 0);
         if (queuePeekContentTranslationRunning)
         {
+            SingingToggleContent.StopAnimation(singingPeekContentTranslation!);
             QueueToggleContent.StopAnimation(queuePeekContentTranslation!);
             queuePeekContentTranslationRunning = false;
         }
@@ -222,14 +240,16 @@ public sealed partial class MainWindow
         if (queueRailPeekActive)
         {
             MaterializeQueueRailPeek(0);
-            queueBrowserPeekChrome!.Visual.Opacity = queuePanelPeekChrome!.Visual.Opacity = 0;
+            queueBrowserPeekChrome!.Visual.Opacity = singingPanelPeekChrome!.Visual.Opacity = queuePanelPeekChrome!.Visual.Opacity = 0;
             BrowserCardChrome.Opacity = queuePeekBrowserOpacity;
+            SingingShellChrome.Opacity = singingPeekPanelOpacity;
             QueueShellChrome.Opacity = queuePeekPanelOpacity;
             queueRailPeekActive = false;
             UpdateBrowserContentClipSize(BrowserContentClip.ActualWidth, BrowserContentClip.ActualHeight);
         }
         queueRailPeekAmount = 0;
         queueRailPeekTarget = false;
+        SingingToggleContent.Translation = new Vector3(2, 0, 0);
         QueueToggleContent.Translation = new Vector3(2, 0, 0);
     }
 }

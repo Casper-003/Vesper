@@ -37,42 +37,71 @@ public sealed partial class MainWindow
                 failures.Add("The navigation content parent must not draw a shared outline across both cards.");
             for (int cycle = 0; cycle < 8; cycle++)
             {
-                if (cycle == 0) { AnimateQueueRailHint(true); AnimateQueueRailContent(.92f); await Task.Delay(160); }
+                if (cycle == 0)
+                {
+                    if (SingingToggleChevron.Opacity != 0 || QueueToggleChevron.Opacity != 0
+                        || SingingCardHost.Visibility != Visibility.Collapsed || QueueCardHost.Visibility != Visibility.Collapsed)
+                        failures.Add("Collapsed strips must stay blank when the pointer is not hovering over them.");
+                    OnQueueRailEntered(QueueOpenButton, null!);
+                    AnimateQueueRailContent(.92f);
+                    await Task.Delay(160);
+                    Root.UpdateLayout();
+                    Point collapsedArrow = QueueToggleChevron.TransformToVisual(QueueShell).TransformPoint(new Point(QueueToggleChevron.ActualWidth / 2, QueueToggleChevron.ActualHeight / 2));
+                    if (!QueueRailPreviewShown || QueueToggleChevron.Opacity != 1
+                        || QueueCardHost.Visibility != Visibility.Visible || Math.Abs(QueueCardHost.ActualWidth - QueueRailHost.Width) > .5
+                        || Math.Abs(QueueCardHost.Opacity - .5) > .05
+                        || Math.Abs(collapsedArrow.Y - QueueShell.ActualHeight / 2) > .5)
+                        failures.Add("Hovering a collapsed strip must fade in the behind content and vertically centered '<' chevron.");
+                    OnQueueRailExited(QueueOpenButton, null!);
+                }
                 browserLayouts = 0;
                 OnQueueToggle(QueueOpenButton, new RoutedEventArgs()); transitions++;
                 if (cycle == 0)
                 {
                     await Task.Delay(80);
-                    if (QueueCardHost.ActualWidth <= 0 || QueueCardHost.ActualWidth >= QueueCard.Width
-                        || QueueChevronRotation.Angle <= 0 || QueueChevronRotation.Angle >= 180)
-                        failures.Add("Queue reveal and chevron must pass through animated intermediate states.");
+                    if (QueueCardHost.ActualWidth <= QueueRailHost.Width || QueueCardHost.ActualWidth >= QueueCard.Width)
+                        failures.Add("Queue reveal must pass through animated intermediate widths.");
                     await Task.Delay(220);
                 }
                 else await Task.Delay(300);
                 Root.UpdateLayout();
                 maxLayoutsPerTransition = Math.Max(maxLayoutsPerTransition, browserLayouts);
-                if (!queuePanelOpen || QueueCardHost.ActualWidth < 100) failures.Add($"cycle {cycle}: queue did not open.");
+                if (!singingPanelOpen || !queuePanelOpen || SingingCardHost.ActualWidth < 100 || QueueCardHost.ActualWidth < 100)
+                    failures.Add($"cycle {cycle}: right panels did not open together in linked mode.");
                 contentChecks.Add(await CheckQueueVisibleContentAsync(failures, cycle, cycle is 0 or 4,
                     cycle == 0 ? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(outputPath))!, "queue-visible-content.png") : null));
-                if (QueueShell.Margin.Left != 4 || QueueShell.Margin.Right != 0 || QueueShell.Margin.Top != 0 || QueueShell.Margin.Bottom != 0)
-                    failures.Add("Queue card spacing differs from the shared four-unit edge.");
+                if (SingingShell.Margin.Left != 4 || QueueShell.Margin.Left != 4 || QueueShell.Margin.Right != 0 || QueueShell.Margin.Top != 0 || QueueShell.Margin.Bottom != 0)
+                    failures.Add("Right sidebar card spacing differs from the shared four-unit edge.");
+                Point singingOrigin = SingingShell.TransformToVisual(BrowserCards).TransformPoint(default);
                 Point queueOrigin = QueueShell.TransformToVisual(BrowserCards).TransformPoint(default);
                 Point browserOrigin = BrowserCard.TransformToVisual(BrowserCards).TransformPoint(default);
-                if (Math.Abs(queueOrigin.Y - browserOrigin.Y) > .5 || Math.Abs(QueueShell.ActualHeight - BrowserCard.ActualHeight) > .5
+                double verticalGap = queueOrigin.Y - (singingOrigin.Y + SingingShell.ActualHeight);
+                if (Math.Abs(singingOrigin.Y - browserOrigin.Y) > .5
+                    || Math.Abs(verticalGap - 4) > .6
+                    || Math.Abs(SingingShell.ActualHeight + 4 + QueueShell.ActualHeight - BrowserCard.ActualHeight) > .6
+                    || Math.Abs(singingOrigin.X - browserOrigin.X - BrowserCard.ActualWidth - 4) > .5
                     || Math.Abs(queueOrigin.X - browserOrigin.X - BrowserCard.ActualWidth - 4) > .5)
-                    failures.Add("The visible queue and browser card edges are not aligned at a four-unit gap.");
-                if (!ReferenceEquals(BrowserCardChrome.Style, QueueShellChrome.Style) || QueueShellChrome.Shadow is not null || QueueCard.Shadow is not null
+                    failures.Add("The visible singing, queue and browser card edges are not aligned at a four-unit gap.");
+                if (!ReferenceEquals(BrowserCardChrome.Style, SingingShellChrome.Style) || !ReferenceEquals(BrowserCardChrome.Style, QueueShellChrome.Style)
+                    || SingingShellChrome.Shadow is not null || QueueShellChrome.Shadow is not null || QueueCard.Shadow is not null
                     || !BrowserCardChrome.BorderThickness.Equals(new Thickness(1)) || !BrowserCardChrome.BorderThickness.Equals(QueueShellChrome.BorderThickness))
                     failures.Add("Each card must independently draw the same one-unit light outline.");
-                Point arrowCenter = QueueToggleChevron.TransformToVisual(QueueShell).TransformPoint(new Point(QueueToggleChevron.ActualWidth / 2, QueueToggleChevron.ActualHeight / 2));
-                if (Math.Abs(arrowCenter.Y - QueueShell.ActualHeight / 2) > .5
-                    || Math.Abs(arrowCenter.X - QueueShellChrome.BorderThickness.Left - QueueRailHost.ActualWidth / 2) > .5
-                    || Math.Abs(QueueChevronRotation.Angle - 180) > .5 || QueueBadge.Visibility != Visibility.Collapsed)
-                    failures.Add("Expanded queue must have a centered left-edge chevron and a single heading count.");
-                if (Math.Abs(QueueOpenButton.ActualHeight - QueueShell.ActualHeight + 2) > .5
-                    || QueueSongs.Padding.Right != QueueRailHost.Width || QueueHeading.Margin.Right != QueueRailHost.Width
+                if (SingingRailHost.Visibility != Visibility.Collapsed || QueueRailHost.Visibility != Visibility.Collapsed
+                    || SingingCollapseButton.Opacity != 0 || QueueCollapseButton.Opacity != 0)
+                    failures.Add("Expanded panels must remove the left rail reserve and hide top-left collapse buttons when not hovered.");
+                OnSingingShellEntered(SingingShell, null!);
+                OnQueueShellEntered(QueueShell, null!);
+                if (SingingCollapseButton.Opacity != 1 || QueueCollapseButton.Opacity != 1)
+                    failures.Add("Hovering an expanded card must fade in its top-left collapse button.");
+                OnSingingShellExited(SingingShell, null!);
+                OnQueueShellExited(QueueShell, null!);
+                var headingTitle = QueueHeading.Children.OfType<TextBlock>().First(tb => tb.Text == "待播曲目");
+                Point titleCenter = headingTitle.TransformToVisual(QueueHeading).TransformPoint(new Point(headingTitle.ActualWidth / 2, headingTitle.ActualHeight / 2));
+                if (Math.Abs(titleCenter.X - QueueHeading.ActualWidth / 2) > 1
+                    || SingingPreviewStage.ActualWidth <= 100 || SingingStagePlayButton.ActualWidth != 56
+                    || QueueSongs.Padding.Right != 12 || QueueHeading.Margin.Right != 12
                     || LibraryScrollRail.Width != 16 || FavoriteScrollRail.Width != 16)
-                    failures.Add("The entire rail must be clickable, with a matching right gutter and separate scrollbar space.");
+                    failures.Add("Expanded cards must have centered queue heading, normal 12-unit side padding, singing preview stage and separate scrollbar space.");
                 if (QueueSongs.ItemsPanelRoot is not ItemsStackPanel panel) throw new InvalidOperationException("Queue list did not realize its virtualizing panel.");
                 foreach (var container in panel.Children.OfType<ListViewItem>())
                 {
@@ -92,11 +121,17 @@ public sealed partial class MainWindow
                 if (cycle < 3) dragPreviewChecks += await CheckQueueDragPreviewAsync(failures, cycle);
                 browserLayouts = 0;
                 OnQueueToggle(QueueOpenButton, new RoutedEventArgs()); transitions++;
-                await Task.Delay(280); Root.UpdateLayout();
+                await Task.Delay(280);
+                OnSingingRailExited(SingingOpenButton, null!);
+                OnQueueRailExited(QueueOpenButton, null!);
+                await Task.Delay(220);
+                Root.UpdateLayout();
                 maxLayoutsPerTransition = Math.Max(maxLayoutsPerTransition, browserLayouts);
-                if (queuePanelOpen || QueueCardHost.Visibility != Visibility.Collapsed || Math.Abs(QueueChevronRotation.Angle) > .5
-                    || QueueBadge.Visibility != Visibility.Visible || Math.Abs(QueueShell.ActualWidth - QueueSidebarWidth) > .5)
-                    failures.Add($"cycle {cycle}: queue close state open={queuePanelOpen}, host={QueueCardHost.Visibility}/{QueueCardHost.ActualWidth:F2}, arrow={QueueChevronRotation.Angle:F2}, badge={QueueBadge.Visibility}, shell={QueueShell.ActualWidth:F2}/{QueueSidebarWidth:F2}, animating={queueLayoutAnimating}.");
+                if (singingPanelOpen || queuePanelOpen || SingingCardHost.Visibility != Visibility.Collapsed || QueueCardHost.Visibility != Visibility.Collapsed
+                    || SingingRailHost.Visibility != Visibility.Visible || QueueRailHost.Visibility != Visibility.Visible
+                    || SingingToggleChevron.Opacity != 0 || QueueToggleChevron.Opacity != 0
+                    || Math.Abs(SingingShell.ActualWidth - QueueSidebarWidth) > .5 || Math.Abs(QueueShell.ActualWidth - QueueSidebarWidth) > .5)
+                    failures.Add($"cycle {cycle}: queue close state open={queuePanelOpen}, host={QueueCardHost.Visibility}/{QueueCardHost.ActualWidth:F2}, chevronOpacity={QueueToggleChevron.Opacity:F2}, shell={QueueShell.ActualWidth:F2}/{QueueSidebarWidth:F2}, animating={queueLayoutAnimating}.");
                 if (cycle == 3)
                 {
                     viewModel.Queue.StartNext([new("queue-check-0", "当前歌曲", [probe])], out _);
@@ -113,10 +148,32 @@ public sealed partial class MainWindow
             int pendingBeforeAdd = viewModel.Queue.Pending.Count;
             viewModel.Queue.Add(new("added-while-open", "展开队列时继续加入", [probe]));
             if (!queuePanelOpen || viewModel.Queue.Pending.Count != pendingBeforeAdd + 1
-                || QueueBadge.Text != viewModel.Queue.Pending.Count.ToString() || !BrowserCard.IsHitTestVisible || BrowserCards.Children.Count != 2)
+                || QueueHeadingCount.Text != viewModel.Queue.Pending.Count.ToString() || !BrowserCard.IsHitTestVisible || BrowserCards.Children.Count != 2)
                 failures.Add("Adding a song must keep the queue open and the browser accessible.");
             await CheckQueueRemoveClickAsync(failures);
             SetQueueOpen(false); transitions++; await Task.Delay(280);
+            double browserClosedWidth = BrowserCard.ActualWidth;
+            double singingBeforeSplit = SingingShell.ActualHeight;
+            SetRightSplitRatio(0.52, save: false); Root.UpdateLayout();
+            if (Math.Abs(SingingShell.ActualHeight / Math.Max(1, QueueSidebarSlot.ActualHeight - 4) - 0.52) > .03
+                || SingingShell.ActualHeight <= singingBeforeSplit)
+                failures.Add("Dragging the vertical split ratio must resize the upper and lower right panels.");
+            SetRightSplitRatio(0.382, save: false); Root.UpdateLayout();
+            LinkRightPanelsSwitch.IsOn = false;
+            OnSingingRailToggle(SingingOpenButton, new RoutedEventArgs()); await Task.Delay(280); Root.UpdateLayout();
+            if (!singingPanelOpen || queuePanelOpen || Math.Abs(BrowserCard.ActualWidth - browserClosedWidth) > .5
+                || SingingCollapseButton.CornerRadius.TopLeft > 6)
+                failures.Add("In unlinked mode, opening only the singing panel must overlay without squeezing the browser card and use a square collapse button.");
+            OnSingingRailToggle(SingingCollapseButton, new RoutedEventArgs()); await Task.Delay(80); Root.UpdateLayout();
+            if (SingingShellChrome.Background is not AcrylicBrush || Math.Abs(SingingCardHost.Opacity - 1) > .01)
+                failures.Add("Collapsing a single overlay panel must retain its frosted material and full content opacity during the close transition.");
+            await Task.Delay(220); Root.UpdateLayout();
+            OnSingingRailToggle(SingingOpenButton, new RoutedEventArgs()); await Task.Delay(280); Root.UpdateLayout();
+            OnQueueToggle(QueueOpenButton, new RoutedEventArgs()); await Task.Delay(280); Root.UpdateLayout();
+            if (!singingPanelOpen || !queuePanelOpen || BrowserCard.ActualWidth >= browserClosedWidth - 100)
+                failures.Add("In unlinked mode, opening both panels must squeeze the browser card.");
+            CloseRightPanels(); await Task.Delay(280); Root.UpdateLayout();
+            LinkRightPanelsSwitch.IsOn = true;
             if (idleTitleResets == 0 || marqueeResets == 0) failures.Add("No realized titles exercised the crash path.");
             if (viewModel.Queue.State != PlaybackState.Paused || viewModel.Queue.Current is null) failures.Add("Queue toggling changed the current song or paused state.");
         }
@@ -167,7 +224,20 @@ public sealed partial class MainWindow
             failures.Add($"cycle {cycle}: visible card geometry host={hostHeight:F2}, card={cardHeight:F2}, heading={headingHeight:F2}, list={listHeight:F2}.");
 
         var panel = QueueSongs.ItemsPanelRoot as ItemsStackPanel;
-        var first = QueueSongs.ContainerFromIndex(Math.Max(0, panel?.FirstVisibleIndex ?? 0)) as ListViewItem;
+        ListViewItem? first = null;
+        if (panel is not null)
+        {
+            for (int index = Math.Max(0, panel.FirstVisibleIndex); index <= panel.LastVisibleIndex; index++)
+                if (QueueSongs.ContainerFromIndex(index) is ListViewItem candidate
+                    && candidate.ContentTemplateRoot is FrameworkElement candidateRow
+                    && candidateRow.FindName("QueueDragHandle") is FrameworkElement candidateHandle
+                    && candidateHandle.ActualHeight > 0)
+                {
+                    Point inList = candidateHandle.TransformToVisual(QueueSongs).TransformPoint(new Point(candidateHandle.ActualWidth / 2, candidateHandle.ActualHeight / 2));
+                    if (inList.Y >= 4 && inList.Y <= QueueSongs.ActualHeight - 4) { first = candidate; break; }
+                }
+            first ??= QueueSongs.ContainerFromIndex(Math.Max(0, panel.FirstVisibleIndex)) as ListViewItem;
+        }
         var row = first?.ContentTemplateRoot as FrameworkElement;
         var handle = row?.FindName("QueueDragHandle") as FrameworkElement;
         bool inClip = false, hit = false;
@@ -266,7 +336,8 @@ public sealed partial class MainWindow
         Root.UpdateLayout();
         if (queueDragFloating is null || Math.Abs(queueDragFloating.ActualWidth - container.ActualWidth) > 1 || container.Opacity != 0)
             failures.Add("Drag must float the whole row and leave a hidden source placeholder.");
-        MoveQueueDragPreview(queueRows.Count - 1); await Task.Delay(30);
+        int lastRealized = Math.Max(2, (QueueSongs.ItemsPanelRoot as ItemsStackPanel)?.LastVisibleIndex ?? (queueRows.Count - 1));
+        MoveQueueDragPreview(Math.Min(queueRows.Count - 1, lastRealized)); await Task.Delay(30);
         MoveQueueDragPreview(1); Root.UpdateLayout();
         if (!viewModel.Queue.Pending.Select(entry => entry.Id).SequenceEqual(original) || queueRows[1].Entry.Id != item.Entry.Id
             || queueRows.Where((row, index) => row.Position != index + 1).Any())

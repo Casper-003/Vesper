@@ -32,10 +32,7 @@ public sealed partial class MainWindow : Window
         ShellPreferences preferences = new();
         try
         {
-            if (Environment.GetEnvironmentVariable("VESPER_NAVIGATION_CHECK_PATH") is { Length: > 0 }
-                || Environment.GetEnvironmentVariable("VESPER_ARTWORK_CHECK_PATH") is { Length: > 0 }
-                || Environment.GetEnvironmentVariable("VESPER_PAGE_CHECK_PATH") is { Length: > 0 }
-                || Environment.GetEnvironmentVariable("VESPER_COLOR_CHECK_PATH") is { Length: > 0 }) canSave = false;
+            if (IsIsolatedUiCheck() || Environment.GetEnvironmentVariable("VESPER_PAGE_CHECK_PATH") is { Length: > 0 }) canSave = false;
             else if (File.Exists(preferencesPath))
                 preferences = JsonSerializer.Deserialize<ShellPreferences>(File.ReadAllText(preferencesPath)) ?? new();
         }
@@ -46,7 +43,7 @@ public sealed partial class MainWindow : Window
             responsivenessTrace = new(DispatcherQueue, tracePath, GetOverviewDiagnostics);
         PageArea.DataContext = viewModel;
         InitializeLibraryPresentation();
-        InitializeQueuePresentation();
+        InitializeQueuePresentation(preferences);
         InitializeSearchPresentation();
         viewModel.HideUnavailable = preferences.HideUnavailable;
         SystemBackdrop = new MicaBackdrop();
@@ -91,7 +88,7 @@ public sealed partial class MainWindow : Window
         if (Navigation.SettingsItem is NavigationViewItem settingsItem) settingsItem.Content = "设置";
         ApplyTheme(); UpdateTitleLayout();
         if (IsIsolatedUiCheck()) PageLoading.Visibility = Visibility.Collapsed;
-        if (!canSave) PreferenceNotice.IsOpen = true;
+        else if (!canSave && Environment.GetEnvironmentVariable("VESPER_PAGE_CHECK_PATH") is not { Length: > 0 }) PreferenceNotice.IsOpen = true;
         if (Environment.GetEnvironmentVariable("VESPER_COLOR_CHECK_PATH") is { Length: > 0 } colorCheckPath)
         {
             if (!libraryInitialized) { libraryInitialized = true; await RunColorChecksAsync(colorCheckPath); }
@@ -191,7 +188,8 @@ public sealed partial class MainWindow : Window
             Directory.CreateDirectory(Path.GetDirectoryName(preferencesPath)!);
             string temporary = preferencesPath + ".tmp";
             File.WriteAllText(temporary, JsonSerializer.Serialize(new ShellPreferences(Navigation.IsPaneOpen,
-                SystemAccent.IsChecked == true, viewModel.HideUnavailable, SeekDuringSingingSwitch.IsOn)));
+                SystemAccent.IsChecked == true, viewModel.HideUnavailable, SeekDuringSingingSwitch.IsOn,
+                LinkRightPanelsSwitch.IsOn, rightSplitRatio)));
             File.Move(temporary, preferencesPath, overwrite: true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -218,7 +216,7 @@ public sealed partial class MainWindow : Window
         string page = request.Key;
         bool showQueue = request.SongId is not null || page != "创作";
         SetQueueSidebarVisible(showQueue);
-        if (showQueue) SetQueueOpen(false);
+        if (showQueue) CloseRightPanels();
         changingSelection = true;
         try
         {
@@ -273,18 +271,9 @@ public sealed partial class MainWindow : Window
         double left = HistoryArea.TransformToVisual(Root).TransformPoint(default).X + HistoryArea.ActualWidth;
         double right = Root.ActualWidth - AppWindow.TitleBar.RightInset / scale;
         var regions = new List<RectInt32>();
-        void Add(double x, double end)
-        {
-            if (end > x) regions.Add(new RectInt32((int)Math.Ceiling(x * scale), 0,
-                (int)Math.Floor((end - x) * scale), (int)Math.Round(AppTitleBar.ActualHeight * scale)));
-        }
-        if (capsule is not null && capsule.Bar.ActualWidth > 0)
-        {
-            double capsuleLeft = capsule.Bar.TransformToVisual(Root).TransformPoint(default).X;
-            Add(left, Math.Max(left, capsuleLeft));
-            Add(Math.Min(right, capsuleLeft + capsule.Bar.ActualWidth), right);
-        }
-        else Add(left, right);
+        if (right > left)
+            regions.Add(new RectInt32((int)Math.Ceiling(left * scale), 0,
+                (int)Math.Floor((right - left) * scale), (int)Math.Round(AppTitleBar.ActualHeight * scale)));
         AppWindow.TitleBar.SetDragRectangles(regions.ToArray());
     }
 

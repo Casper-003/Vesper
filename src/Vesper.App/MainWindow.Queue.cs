@@ -24,14 +24,17 @@ public sealed partial class MainWindow
     private readonly DispatcherTimer queueUndoTimer = new() { Interval = TimeSpan.FromSeconds(5) };
     private readonly DispatcherTimer queueAdditionTimer = new() { Interval = TimeSpan.FromSeconds(4) };
     private readonly DispatcherTimer queueAvailabilityTimer = new() { Interval = TimeSpan.FromSeconds(5) };
-    private bool queuePanelOpen, queueAvailabilityBusy, queueCloseApproved, queueClosing;
+    private bool singingPanelOpen, queuePanelOpen, queueAvailabilityBusy, queueCloseApproved, queueClosing;
     private int queueAvailabilityRevision;
     private double queueScrollOffset;
     private readonly HashSet<TextBlock> queueScrollingTitles = [];
 
-    private void InitializeQueuePresentation()
+    private void InitializeQueuePresentation(ShellPreferences preferences)
     {
+        LinkRightPanelsSwitch.IsOn = preferences.LinkRightPanels;
+        SetRightSplitRatio(preferences.RightSplitRatio, save: false);
         InitializeQueueRailPeek();
+        InitializeRightPanelFades();
         QueueSongs.ItemsSource = queueRows;
         QueueSongs.ContainerContentChanging += OnQueueContainerChanging;
         viewModel.Queue.Pending.CollectionChanged += OnQueueCollectionChanged;
@@ -88,8 +91,7 @@ public sealed partial class MainWindow
         CancelQueueDrag(false);
         StopQueueSidebarTransition();
         StopQueueLayoutTransition();
-        queueChevronAnimation?.Stop();
-        queueChevronAnimation = null;
+        ResetRailPreviews();
         CloseQueueRailPeek();
         queueUndoTimer.Stop(); queueAdditionTimer.Stop(); queueAvailabilityTimer.Stop(); queueDragTimer.Stop();
         viewModel.Queue.Pending.CollectionChanged -= OnQueueCollectionChanged;
@@ -139,7 +141,7 @@ public sealed partial class MainWindow
         else { currentQueueRow?.Dispose(); currentQueueRow = null; QueueCurrentContent.Content = null; }
         QueueCurrentArea.Visibility = currentQueueRow is null ? Visibility.Collapsed : Visibility.Visible;
         QueueCurrentState.Text = viewModel.Queue.State switch { PlaybackState.Playing => "播放中", PlaybackState.Paused => "已暂停", PlaybackState.Loading => "正在准备", _ => "" };
-        QueueHeadingCount.Text = pending.Count.ToString(); QueueBadge.Text = pending.Count.ToString();
+        QueueHeadingCount.Text = pending.Count.ToString();
         UpdateQueueToggle();
         QueueEmpty.Visibility = pending.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         QueueEmptyTitle.Text = currentQueueRow is null ? "暂无待播" : "暂无后续歌曲";
@@ -163,26 +165,37 @@ public sealed partial class MainWindow
         finally { queueAvailabilityBusy = false; }
     }
 
-    private void OnQueueToggle(object sender, RoutedEventArgs args) => SetQueueOpen(!queuePanelOpen);
+    private void OnSingingRailToggle(object sender, RoutedEventArgs args)
+    {
+        bool open = !singingPanelOpen;
+        SetRightPanelsOpen(open, LinkRightPanelsSwitch.IsOn ? open : queuePanelOpen);
+    }
+    private void OnQueueToggle(object sender, RoutedEventArgs args)
+    {
+        bool open = !queuePanelOpen;
+        SetRightPanelsOpen(LinkRightPanelsSwitch.IsOn ? open : singingPanelOpen, open);
+    }
     private void OnQueueRootKeyDown(object sender, KeyRoutedEventArgs args)
     {
         if (args.Key != VirtualKey.Escape || args.Handled || singingExitPrompt) return;
         if (singingVisible) { args.Handled = true; ReturnToBrowsing(); return; }
-        if (capsule?.IsOpen == true) { capsule.Close(); args.Handled = true; return; }
         if (CancelQueueDrag()) { args.Handled = true; return; }
-        if (queuePanelOpen) { SetQueueOpen(false); args.Handled = true; }
+        if (singingPanelOpen || queuePanelOpen) { CloseRightPanels(); args.Handled = true; }
     }
     private double QueueCardGutter => QueueShell.Margin.Left + QueueShell.Margin.Right;
     private double QueueSidebarWidth => QueueRailHost.Width + QueueShellChrome.BorderThickness.Left + QueueShellChrome.BorderThickness.Right;
-    private double QueueCardWidth => Math.Clamp(BrowserCards.ActualWidth - QueueSidebarWidth - QueueRailHost.Width - 320 - QueueCardGutter, 230, 400) + QueueRailHost.Width;
+    private double QueueCardWidth => Math.Clamp(BrowserCards.ActualWidth - 320 - QueueCardGutter - QueueShellChrome.BorderThickness.Left - QueueShellChrome.BorderThickness.Right, 230, 400);
 
     private void UpdateQueueToggle()
     {
-        AnimateQueueChevron();
-        QueueBadge.Visibility = queuePanelOpen ? Visibility.Collapsed : Visibility.Visible;
-        string action = queuePanelOpen ? "收起待播曲目" : "展开待播曲目";
-        ToolTipService.SetToolTip(QueueOpenButton, $"{action} · {viewModel.Queue.Pending.Count} 首");
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(QueueOpenButton, action);
+        // Expanded cards have no left rail: the strip only exists while collapsed.
+        SingingRailHost.Visibility = singingPanelOpen ? Visibility.Collapsed : Visibility.Visible;
+        QueueRailHost.Visibility = queuePanelOpen ? Visibility.Collapsed : Visibility.Visible;
+        if (singingPanelOpen) singingRailPreview = false;
+        if (queuePanelOpen) queueRailPreview = false;
+        RefreshRightRailChevrons();
+        RefreshRightPanelCollapseButtons();
+        ToolTipService.SetToolTip(QueueOpenButton, $"展开待播曲目 · {viewModel.Queue.Pending.Count} 首");
     }
 
     private async void OnQueueRowLoaded(object sender, RoutedEventArgs args)
@@ -216,7 +229,7 @@ public sealed partial class MainWindow
     private void OpenQueuedDetails(QueueSongItem row)
     {
         if (row.Song is null) return;
-        SetQueueOpen(false);
+        CloseRightPanels();
         NavigateShell(new ShellNavigationRequest("歌曲详情:" + row.Song.Song.Id, this, row.Song.Song.Id));
     }
     private void OnQueueRemove(object sender, RoutedEventArgs args) { if (sender is FrameworkElement { DataContext: QueueSongItem row }) RemoveQueued(row); }
@@ -295,9 +308,10 @@ public sealed partial class MainWindow
     {
         QueueAdditionMessage.Text = $"已加入待播 · 第 {viewModel.Queue.Pending.Count} 位 · {song.Title}";
         QueueAdditionToast.Visibility = Visibility.Visible; queueAdditionTimer.Stop(); queueAdditionTimer.Start();
-        if (!queueSidebarVisible || queueSidebarAnimating || Root.XamlRoot is null || QueueOpenButton.ActualWidth <= 0) return;
+        if (!queueSidebarVisible || queueSidebarAnimating || Root.XamlRoot is null || QueueShell.ActualWidth <= 0) return;
+        FrameworkElement targetElement = queuePanelOpen && QueueHeadingCount.ActualWidth > 0 ? QueueHeadingCount : QueueShell;
         Point start = (origin ?? PageArea).TransformToVisual(Root).TransformPoint(new Point((origin ?? PageArea).ActualWidth / 2, (origin ?? PageArea).ActualHeight / 2));
-        Point end = QueueToggleContent.TransformToVisual(Root).TransformPoint(new Point(QueueToggleContent.ActualWidth / 2, QueueToggleContent.ActualHeight / 2));
+        Point end = targetElement.TransformToVisual(Root).TransformPoint(new Point(targetElement.ActualWidth / 2, targetElement.ActualHeight / 2));
         var note = new TextBlock { Text = "♪", FontSize = 24, Foreground = (Brush)Navigation.Resources["NavigationViewSelectionIndicatorForeground"] };
         Canvas.SetLeft(note, start.X); Canvas.SetTop(note, start.Y); QueueFlightLayer.Children.Add(note);
         ElementCompositionPreview.SetIsTranslationEnabled(note, true);
@@ -313,7 +327,7 @@ public sealed partial class MainWindow
             if (closed) return;
             var receive = compositor.CreateVector3KeyFrameAnimation(); receive.Target = "Scale";
             receive.InsertKeyFrame(0, Vector3.One); receive.InsertKeyFrame(.5f, new(1.15f, 1.15f, 1)); receive.InsertKeyFrame(1, Vector3.One); receive.Duration = TimeSpan.FromMilliseconds(180);
-            QueueToggleContent.StartAnimation(receive);
+            if (!queuePanelOpen) QueueToggleContent.StartAnimation(receive);
         };
         batch.End();
     }

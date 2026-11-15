@@ -21,11 +21,17 @@ public sealed partial class MainWindow
         QueueSidebarSlot.Width = from;
         StopQueueSidebarTransition();
         StopQueueLayoutTransition();
+        ResetRailPreviews();
         queueSidebarVisible = visible;
+        singingPanelOpen = false;
         queuePanelOpen = false;
         queueAvailabilityTimer.Stop();
         ClearQueueDrag();
         UpdateQueueToggle();
+        Grid.SetColumnSpan(BrowserCard, 1);
+        BrowserCard.Margin = new Thickness(0);
+        SingingShell.IsHitTestVisible = false;
+        RightSidebarSplitter.IsHitTestVisible = false;
         QueueShell.IsHitTestVisible = false;
         QueueSidebarSlot.Visibility = Visibility.Visible;
         queueSidebarAnimating = true;
@@ -66,10 +72,17 @@ public sealed partial class MainWindow
         // Use the same right-anchored reveal as ordinary queue closing. Once the
         // content is gone, the unscaled rail and its gutter also slide out of view.
         double shellWidth = Math.Max(QueueSidebarWidth, width - QueueCardGutter);
+        if (SingingShell.Width != shellWidth) SingingShell.Width = shellWidth;
         if (QueueShell.Width != shellWidth) QueueShell.Width = shellWidth;
-        double contentWidth = Math.Max(0, shellWidth - QueueSidebarWidth);
+        double contentWidth = shellWidth > QueueSidebarWidth + .5 ? Math.Max(0, shellWidth - 2) : 0;
+        if (SingingCardHost.Width != contentWidth) SingingCardHost.Width = contentWidth;
         if (QueueCardHost.Width != contentWidth) QueueCardHost.Width = contentWidth;
+        SingingCardHost.Opacity = contentWidth > 0 ? 1 : 0;
+        QueueCardHost.Opacity = contentWidth > 0 ? 1 : 0;
+        SingingCardHost.Visibility = contentWidth > 0 ? Visibility.Visible : Visibility.Collapsed;
         QueueCardHost.Visibility = contentWidth > 0 ? Visibility.Visible : Visibility.Collapsed;
+        PositionSingingCard();
+        UpdateSingingHostClip();
         PositionQueueCard();
         UpdateQueueHostClip();
         queueSidebarClip.Rect = new Rect(0, 0, Math.Max(0, width), Math.Max(0, height));
@@ -78,10 +91,13 @@ public sealed partial class MainWindow
 
     private void SettleQueueSidebar()
     {
+        SingingShell.Width = double.NaN;
         QueueShell.Width = double.NaN;
         QueueSidebarSlot.Width = queueSidebarVisible ? double.NaN : 0;
         QueueSidebarSlot.Visibility = queueSidebarVisible ? Visibility.Visible : Visibility.Collapsed;
         QueueSidebarSlot.Clip = null;
+        SingingShell.IsHitTestVisible = queueSidebarVisible;
+        RightSidebarSplitter.IsHitTestVisible = queueSidebarVisible;
         QueueShell.IsHitTestVisible = queueSidebarVisible;
         SettleQueueLayout(focusToggle: false);
     }

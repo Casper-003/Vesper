@@ -37,6 +37,16 @@ public sealed partial class MainWindow
             var element = browser ? BrowserCardChrome : QueueShellChrome;
             return element.TransformToVisual(Root).TransformBounds(new Rect(0, 0, element.ActualWidth, element.ActualHeight));
         }
+        Rect SingingChromeBounds()
+        {
+            if (queueRailPeekActive && singingPanelPeekChrome is not null)
+            {
+                var geometry = singingPanelPeekChrome.StrokeGeometry;
+                var bounds = new Rect(geometry.Offset.X - .5, geometry.Offset.Y - .5, geometry.Size.X + 1, geometry.Size.Y + 1);
+                return SingingPeekChromeLayer.TransformToVisual(Root).TransformBounds(bounds);
+            }
+            return SingingShellChrome.TransformToVisual(Root).TransformBounds(new Rect(0, 0, SingingShellChrome.ActualWidth, SingingShellChrome.ActualHeight));
+        }
         double left = ChromeBounds(false).Left, right = ChromeBounds(false).Right;
         double browserWidthBeforeHint = ChromeBounds(true).Width;
         int hoverPageLayouts = 0, hoverRowLayouts = 0, hoverFontChanges = 0;
@@ -50,8 +60,8 @@ public sealed partial class MainWindow
         var gapSamples = new List<double[]>();
         void CheckGaps()
         {
-            Rect shell = ChromeBounds(false), browser = ChromeBounds(true);
-            double[] gaps = [Root.ActualHeight - shell.Bottom, shell.Left - browser.Right, Root.ActualWidth - shell.Right];
+            Rect singing = SingingChromeBounds(), shell = ChromeBounds(false), browser = ChromeBounds(true);
+            double[] gaps = [Root.ActualHeight - shell.Bottom, shell.Top - singing.Bottom, singing.Left - browser.Right, shell.Left - browser.Right, Root.ActualWidth - singing.Right, Root.ActualWidth - shell.Right];
             gapSamples.Add(gaps);
             if (gaps.Any(gap => Math.Abs(gap - 4) > .6)) failures.Add($"Card gaps must stay four units: {string.Join(",", gaps.Select(gap => gap.ToString("F2")))}.");
         }

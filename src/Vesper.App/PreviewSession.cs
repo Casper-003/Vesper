@@ -18,6 +18,8 @@ internal sealed class PreviewSession : IDisposable
     public bool Ended { get; private set; }
     public string Error { get; private set; } = "";
     public bool Singing { get; private set; }
+    // 预留后台预览留存开关；当前首版仅在详情页前台播放，离开详情页时自动停止。
+    public bool BackgroundRetentionEnabled { get; set; }
     public event Action? Changed;
     public PreviewSession(Microsoft.UI.Dispatching.DispatcherQueue dispatcher)
     {

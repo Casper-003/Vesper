@@ -178,10 +178,16 @@ public sealed partial class MainWindow
             double top = QueueDragLayoutTop(container);
             positions[row.Entry.Id] = top + QueueDragMotionOffset(row.Entry.Id, now);
         }
+        double? scrollOffset = queueDragViewer?.VerticalOffset;
         queueRows.Move(from, targetIndex);
         for (int i = Math.Min(from, targetIndex); i <= Math.Max(from, targetIndex); i++) queueRows[i].SetPosition(i + 1);
         ScheduleQueueRowSurfaceRefresh();
         QueueSongs.UpdateLayout();
+        if (scrollOffset is { } targetScroll && queueDragViewer is not null && Math.Abs(queueDragViewer.VerticalOffset - targetScroll) > .5)
+        {
+            queueDragViewer.ChangeView(null, targetScroll, null, true);
+            QueueSongs.UpdateLayout();
+        }
         foreach (var container in RealizedQueueDragContainers())
         {
             SyncQueueDragContainer(container);

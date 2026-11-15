@@ -47,7 +47,7 @@ internal sealed class SingingSession : IDisposable
         if (song is null) { preparation = null; return; }
         try
         {
-            string? path = song.Sources.FirstOrDefault(path => IsVideoFile(path) && File.Exists(path)) ?? song.AvailablePath;
+            string? path = FindVideoPath(song) ?? song.AvailablePath;
             if (path is null) throw new FileNotFoundException();
             await Playback.PrepareAsync(path, cancellation.Token);
             if (request != revision || disposed) return;
@@ -96,6 +96,9 @@ internal sealed class SingingSession : IDisposable
         }
         finally { composition.Clips.Clear(); }
     }
+
+    internal static string? FindVideoPath(Song song) =>
+        song.Sources.FirstOrDefault(path => IsVideoFile(path) && File.Exists(path));
 
     private static bool IsVideoFile(string path) => Path.GetExtension(path).ToLowerInvariant()
         is ".mp4" or ".mkv" or ".avi" or ".mov" or ".wmv" or ".m4v" or ".webm" or ".ts" or ".mpeg" or ".mpg";

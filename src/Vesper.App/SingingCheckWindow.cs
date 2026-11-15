@@ -124,8 +124,12 @@ internal sealed class SingingCheckWindow : Window
             await latestExpansion.WaitAsync(TimeSpan.FromSeconds(1));
             Check(session.Ready && queue.State == PlaybackState.Playing,
                 "连续展开时旧动画完成不打断新动画或当前播放");
-            Check(JsonSerializer.Deserialize<ShellPreferences>("{\"PaneOpen\":true}")!.SingingSeekEnabled,
-                "旧版偏好缺少进度设置时默认允许拖动");
+            await view.CollapseAsync(animationOrigin, animationSize).WaitAsync(TimeSpan.FromSeconds(1));
+            Check(view.Opacity == 1 && session.Ready && queue.State == PlaybackState.Playing,
+                "返回浏览收起过渡动画完成后复位变换且不中断后台播放");
+            var defaultPrefs = JsonSerializer.Deserialize<ShellPreferences>("{\"PaneOpen\":true}")!;
+            Check(defaultPrefs.SingingSeekEnabled && defaultPrefs.LinkRightPanels && Math.Abs(defaultPrefs.RightSplitRatio - 0.382) < .001,
+                "旧版偏好缺少进度与右栏设置时默认允许拖动、双栏联动且按 0.382 划分高度");
             Invoke(view.Pause);
             await Until(() => session.Playback.State == MediaPlaybackState.Paused);
             var position = session.Playback.Position;

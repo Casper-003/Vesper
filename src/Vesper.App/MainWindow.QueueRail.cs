@@ -1,53 +1,149 @@
 using System.Numerics;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Media.Animation;
 
 namespace Vesper.App;
 
 public sealed partial class MainWindow
 {
-    private Storyboard? queueChevronAnimation;
-    private bool queueChevronOpen;
+    // Collapsed strips stay blank until hovered. Hover fades in the panel's own
+    // leading content (Spotify-like) and a vertically centered "<". Expanded cards
+    // have no rail; their top-left collapse button fades in while the pointer is
+    // inside the card or the button has keyboard focus.
+    private const double RailPreviewOpacity = .5;
+    private static readonly TimeSpan RightPanelFade = TimeSpan.FromMilliseconds(160);
+    private bool singingRailPointerOver, queueRailPointerOver, singingShellPointerInside, queueShellPointerInside;
+    private bool singingRailPreview, queueRailPreview;
+    private int singingRailPreviewRevision, queueRailPreviewRevision;
 
-    private void AnimateQueueChevron()
+    internal bool SingingRailPreviewShown => singingRailPreview;
+    internal bool QueueRailPreviewShown => queueRailPreview;
+
+    private void InitializeRightPanelFades()
     {
-        if (queueChevronOpen == queuePanelOpen) return;
-        queueChevronOpen = queuePanelOpen;
-        double from = QueueChevronRotation.Angle;
-        queueChevronAnimation?.Stop();
-        QueueChevronRotation.Angle = from;
-        double target = queuePanelOpen ? 180 : 0;
-        var storyboard = new Storyboard();
-        var turn = new DoubleAnimation
-        {
-            From = from, To = target, Duration = TimeSpan.FromMilliseconds(200),
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-        };
-        Storyboard.SetTarget(turn, QueueChevronRotation);
-        Storyboard.SetTargetProperty(turn, "Angle");
-        storyboard.Children.Add(turn);
-        storyboard.Completed += (_, _) =>
-        {
-            if (!ReferenceEquals(queueChevronAnimation, storyboard)) return;
-            storyboard.Stop(); QueueChevronRotation.Angle = target; queueChevronAnimation = null;
-        };
-        queueChevronAnimation = storyboard; storyboard.Begin();
-        AnimateQueueRailHint(false);
+        foreach (UIElement element in new UIElement[] { SingingCardHost, QueueCardHost, SingingToggleChevron, QueueToggleChevron, SingingCollapseButton, QueueCollapseButton })
+            element.OpacityTransition = new ScalarTransition { Duration = RightPanelFade };
     }
 
+    private void OnSingingRailEntered(object sender, PointerRoutedEventArgs args)
+    {
+        singingRailPointerOver = true;
+        AnimateQueueRailHint(!singingPanelOpen && !queuePanelOpen);
+        SetRailPreview(singing: true, show: true);
+    }
+    private void OnSingingRailExited(object sender, PointerRoutedEventArgs args)
+    {
+        singingRailPointerOver = false;
+        AnimateQueueRailHint(false);
+        SetRailPreview(singing: true, show: false);
+    }
+    private void OnSingingRailPressed(object sender, PointerRoutedEventArgs args) => AnimateSingingRailContent(.92f);
+    private void OnSingingRailReleased(object sender, PointerRoutedEventArgs args) => AnimateSingingRailContent(1);
+
     private void OnQueueRailEntered(object sender, PointerRoutedEventArgs args)
-    { AnimateQueueRailHint(!queuePanelOpen); }
+    {
+        queueRailPointerOver = true;
+        AnimateQueueRailHint(!singingPanelOpen && !queuePanelOpen);
+        SetRailPreview(singing: false, show: true);
+    }
     private void OnQueueRailExited(object sender, PointerRoutedEventArgs args)
-    { AnimateQueueRailHint(false); }
+    {
+        queueRailPointerOver = false;
+        AnimateQueueRailHint(false);
+        SetRailPreview(singing: false, show: false);
+    }
     private void OnQueueRailPressed(object sender, PointerRoutedEventArgs args) => AnimateQueueRailContent(.92f);
     private void OnQueueRailReleased(object sender, PointerRoutedEventArgs args) => AnimateQueueRailContent(1);
+
+    private void OnRightRailFocusChanged(object sender, RoutedEventArgs args) => RefreshRightRailChevrons();
+
+    private void OnSingingShellEntered(object sender, PointerRoutedEventArgs args) { singingShellPointerInside = true; RefreshRightPanelCollapseButtons(); }
+    private void OnSingingShellExited(object sender, PointerRoutedEventArgs args) { singingShellPointerInside = false; RefreshRightPanelCollapseButtons(); }
+    private void OnQueueShellEntered(object sender, PointerRoutedEventArgs args) { queueShellPointerInside = true; RefreshRightPanelCollapseButtons(); }
+    private void OnQueueShellExited(object sender, PointerRoutedEventArgs args) { queueShellPointerInside = false; RefreshRightPanelCollapseButtons(); }
+    private void OnRightPanelCollapseFocusChanged(object sender, RoutedEventArgs args) => RefreshRightPanelCollapseButtons();
+
+    private void RefreshRightPanelCollapseButtons()
+    {
+        SetCollapseButton(SingingCollapseButton, singingPanelOpen, singingShellPointerInside);
+        SetCollapseButton(QueueCollapseButton, queuePanelOpen, queueShellPointerInside);
+
+        static void SetCollapseButton(Button button, bool open, bool pointerInside)
+        {
+            button.IsHitTestVisible = open;
+            button.IsTabStop = open;
+            double target = open && pointerInside ? 1 : 0;
+            if (button.Opacity != target) button.Opacity = target;
+        }
+    }
+
+    private void RefreshRightRailChevrons()
+    {
+        SetChevron(SingingToggleChevron, !singingPanelOpen && singingRailPreview);
+        SetChevron(QueueToggleChevron, !queuePanelOpen && queueRailPreview);
+
+        static void SetChevron(UIElement chevron, bool shown)
+        {
+            double target = shown ? 1 : 0;
+            if (chevron.Opacity != target) chevron.Opacity = target;
+        }
+    }
+
+    private void SetRailPreview(bool singing, bool show)
+    {
+        Canvas host = singing ? SingingCardHost : QueueCardHost;
+        bool open = singing ? singingPanelOpen : queuePanelOpen;
+        show = show && !closed && queueSidebarVisible && !queueSidebarAnimating && !open && !queueLayoutAnimating;
+        if (open || queueLayoutAnimating || queueSidebarAnimating)
+        {
+            // The card itself owns the host during real opening and closing.
+            if (singing) singingRailPreview = false; else queueRailPreview = false;
+            RefreshRightRailChevrons();
+            return;
+        }
+        if (singing) singingRailPreview = show; else queueRailPreview = show;
+        int revision = singing ? ++singingRailPreviewRevision : ++queueRailPreviewRevision;
+        RefreshRightRailChevrons();
+        if (show)
+        {
+            double cardWidth = QueueCardWidth;
+            host.Width = QueueRailHost.Width;
+            host.Visibility = Visibility.Visible;
+            if (singing) { SingingCard.Width = cardWidth; PositionSingingCard(); UpdateSingingHostClip(); }
+            else { QueueCard.Width = cardWidth; PositionQueueCard(); UpdateQueueHostClip(); }
+            host.Opacity = RailPreviewOpacity;
+        }
+        else
+        {
+            host.Opacity = 0;
+            _ = HideRailPreviewHostAsync(singing, revision);
+        }
+    }
+
+    private async Task HideRailPreviewHostAsync(bool singing, int revision)
+    {
+        await Task.Delay(RightPanelFade + TimeSpan.FromMilliseconds(40));
+        if (closed || revision != (singing ? singingRailPreviewRevision : queueRailPreviewRevision)) return;
+        if ((singing ? singingPanelOpen : queuePanelOpen) || queueLayoutAnimating || queueSidebarAnimating) return;
+        Canvas host = singing ? SingingCardHost : QueueCardHost;
+        host.Visibility = Visibility.Collapsed;
+        host.Width = 0;
+    }
+
+    private void ResetRailPreviews()
+    {
+        ++singingRailPreviewRevision; ++queueRailPreviewRevision;
+        singingRailPreview = queueRailPreview = false;
+        RefreshRightRailChevrons();
+    }
 
     private void AnimateQueueRailHint(bool peek)
     {
         AnimateQueueRailPeek(peek);
+        AnimateSingingRailContent(1);
         AnimateQueueRailContent(1);
     }
 
@@ -56,14 +152,17 @@ public sealed partial class MainWindow
         ResetQueueRailPeek();
     }
 
-    private void AnimateQueueRailContent(float target)
+    private void AnimateSingingRailContent(float target) => AnimateRailContent(SingingToggleContent, target);
+    private void AnimateQueueRailContent(float target) => AnimateRailContent(QueueToggleContent, target);
+
+    private void AnimateRailContent(UIElement content, float target)
     {
         if (closed || !queueSidebarVisible || queueSidebarAnimating) return;
-        QueueToggleContent.CenterPoint = new Vector3(17, 36, 0);
+        content.CenterPoint = new Vector3(17, 36, 0);
         var compositor = ElementCompositionPreview.GetElementVisual(Root).Compositor;
         var pulse = compositor.CreateVector3KeyFrameAnimation();
         pulse.Target = "Scale"; pulse.InsertExpressionKeyFrame(0, "this.StartingValue");
         pulse.InsertKeyFrame(1, new Vector3(target)); pulse.Duration = TimeSpan.FromMilliseconds(100);
-        QueueToggleContent.StartAnimation(pulse);
+        content.StartAnimation(pulse);
     }
 }
