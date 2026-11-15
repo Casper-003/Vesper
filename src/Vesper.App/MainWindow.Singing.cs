@@ -193,6 +193,7 @@ public sealed partial class MainWindow
     {
         if (singingVisible || closed) return;
         singingVisible = true; singingPresentationRevision++;
+        UpdateHomeConsoleActiveState();
         browserPresenter = AppWindow.Presenter;
         AppWindow.SetPresenter(AppWindowPresenterKind.FullScreen);
         Navigation.IsEnabled = false; BackButton.IsEnabled = ForwardButton.IsEnabled = false;
@@ -206,6 +207,7 @@ public sealed partial class MainWindow
         int request = ++singingPresentationRevision;
         if (!singingVisible || closed) return;
         singingVisible = false;
+        UpdateHomeConsoleActiveState();
         singingView.SetActive(false);
         if (browserPresenter is not null) AppWindow.SetPresenter(browserPresenter);
         browserPresenter = null;
@@ -288,6 +290,7 @@ public sealed partial class MainWindow
             viewModel.Queue.State == PlaybackState.Paused, viewModel.Queue.Pending.Count, singing.Message, SeekDuringSingingSwitch.IsOn);
         singingView.UpdateTime(singing.Playback.Position, singing.Playback.Duration);
         if (!singing.Loading && !singing.Ready && singing.Message.Length > 0) singingEntryRequested = false;
+        RefreshHomeConsoleQueue();
     }
 
     private void UpdateSingingCardArtwork(QueueEntry? currentEntry, LibrarySongItem? previewSong)

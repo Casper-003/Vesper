@@ -24,13 +24,29 @@ internal sealed class WasapiMonitoring : IDisposable
     private readonly Action<Exception> failed;
     private int disposed, launched;
     private float gain = .2f;
+    private float inputPeak;
     public Task<MonitoringInfo> Started => started.Task;
     public Task Finished => finished.Task;
     public long Underruns { get; private set; }
     public long DroppedSamples { get; private set; }
     public long CaptureDiscontinuities { get; private set; }
     public long OutputShortages { get; private set; }
+    public float InputLevel => Volatile.Read(ref inputPeak);
     public float Gain { set => Volatile.Write(ref gain, float.IsFinite(value) ? Math.Clamp(value, 0, 1) : 0); }
+
+    internal static void UpdatePeak(ref float peak, float packetPeak)
+    {
+        float previous = Volatile.Read(ref peak);
+        float next = packetPeak >= previous ? packetPeak : MathF.Max(packetPeak, previous * 0.86f);
+        Volatile.Write(ref peak, next < 1e-5f ? 0f : next);
+    }
+
+    internal static double NormalizeMeterLevel(float rawPeak)
+    {
+        if (!float.IsFinite(rawPeak) || rawPeak <= 1e-6f) return 0;
+        double db = 20.0 * Math.Log10(Math.Clamp(rawPeak, 1e-6f, 1.0f));
+        return Math.Clamp((db + 52.0) / 52.0, 0.0, 1.0);
+    }
 
     internal WasapiMonitoring(string inputId, string outputId, MonitoringMode mode, Action<Exception> failed)
     { this.inputId = inputId; this.outputId = outputId; this.mode = mode; this.failed = failed; }
@@ -102,7 +118,7 @@ internal sealed class WasapiMonitoring : IDisposable
         finally { if (format != 0) Marshal.FreeCoTaskMem(format); Release(client); Release(device); Release(devices); CoUninitialize(); }
     }
 
-    private sealed class Endpoint : IDisposable
+    internal sealed class Endpoint : IDisposable
     {
         internal readonly IClient Client;
         internal readonly AutoResetEvent Event = new(false);
@@ -274,19 +290,29 @@ internal sealed class WasapiMonitoring : IDisposable
                 if (signal == WaitHandle.WaitTimeout) throw new TimeoutException("音频设备没有响应。");
                 Check(capture.GetNextPacketSize(out uint packet));
                 int packets = 0;
+                float packetPeak = 0f;
+                bool readAny = false;
                 while (packet > 0 && packets++ < 64)
                 {
                     Check(capture.GetBuffer(out nint data, out uint frames, out uint flags, out _, out _));
                     try
                     {
+                        readAny = true;
                         if ((flags & 1) != 0)
                         { if (outputStarted) CaptureDiscontinuities++; buffer.DiscardQueued(); smoother.Discontinuity(); }
-                        for (int f = 0; f < frames; f++) buffer.Push((flags & 2) != 0 ? 0 : input.Read(data, f));
+                        for (int f = 0; f < frames; f++)
+                        {
+                            float sample = (flags & 2) != 0 ? 0 : input.Read(data, f);
+                            buffer.Push(sample);
+                            float abs = MathF.Abs(sample);
+                            if (abs > packetPeak) packetPeak = abs;
+                        }
                     }
                     finally { Check(capture.ReleaseBuffer(frames)); }
                     Check(capture.GetNextPacketSize(out packet));
                     if (stop.WaitOne(0)) break;
                 }
+                if (readAny) UpdatePeak(ref inputPeak, packetPeak);
                 // Exclusive event-driven streams must acquire a complete hardware
                 // buffer only on the render event, not on capture wakeups.
                 if (exclusive && outputStarted && signal != 2) continue;
@@ -366,9 +392,122 @@ internal sealed class WasapiMonitoring : IDisposable
             }
             finally
             {
+                Volatile.Write(ref inputPeak, 0f);
                 if (mmcss != 0) AvRevertMmThreadCharacteristics(mmcss);
                 if (com) CoUninitialize();
                 started.TrySetCanceled();
+                lock (stop) { finished.TrySetResult(); stop.Dispose(); }
+            }
+        }
+    }
+}
+
+// Silent microphone meter probe used when staying on the Home console with monitoring off.
+internal sealed class WasapiMicMeter : IDisposable
+{
+    private readonly ManualResetEvent stop = new(false);
+    private readonly TaskCompletionSource finished = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly string inputId;
+    private readonly Action<Exception>? failed;
+    private int disposed, launched;
+    private float inputPeak;
+
+    public Task Finished => finished.Task;
+    public float InputLevel => Volatile.Read(ref inputPeak);
+
+    internal WasapiMicMeter(string inputId, Action<Exception>? failed = null)
+    {
+        this.inputId = inputId;
+        this.failed = failed;
+    }
+
+    public void Start()
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
+        if (Interlocked.Exchange(ref launched, 1) != 0) throw new InvalidOperationException("试麦采集线程已经启动。");
+        var thread = new Thread(Run) { IsBackground = true, Name = "Vesper WASAPI mic meter" };
+        thread.SetApartmentState(ApartmentState.MTA);
+        thread.Start();
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref disposed, 1) == 0)
+        {
+            lock (stop) { if (!finished.Task.IsCompleted) stop.Set(); }
+        }
+    }
+
+    private void Run()
+    {
+        IDevices? devices = null;
+        WasapiMonitoring.Endpoint? input = null;
+        ICapture? capture = null;
+        nint mmcss = 0;
+        bool com = false;
+        try
+        {
+            Check(CoInitializeEx(0, 0));
+            com = true;
+            if (stop.WaitOne(0)) return;
+            devices = (IDevices)new Enumerator();
+            input = new WasapiMonitoring.Endpoint(devices, inputId, MonitoringMode.LowLatency);
+            Guid iid = CaptureId;
+            Check(input.Client.GetService(ref iid, out object service));
+            capture = (ICapture)service;
+            WaitHandle[] events = [stop, input.Event];
+            if (stop.WaitOne(0)) return;
+            mmcss = AvSetMmThreadCharacteristics("Pro Audio", out _);
+            Check(input.Client.Start());
+            int signal;
+            while ((signal = WaitHandle.WaitAny(events, 2000)) != 0)
+            {
+                if (stop.WaitOne(0)) break;
+                if (signal == WaitHandle.WaitTimeout) throw new TimeoutException("麦克风没有响应。");
+                Check(capture.GetNextPacketSize(out uint packet));
+                int packets = 0;
+                float packetPeak = 0f;
+                bool readAny = false;
+                while (packet > 0 && packets++ < 64)
+                {
+                    Check(capture.GetBuffer(out nint data, out uint frames, out uint flags, out _, out _));
+                    try
+                    {
+                        readAny = true;
+                        if ((flags & 2) == 0)
+                        {
+                            for (int f = 0; f < frames; f++)
+                            {
+                                float abs = MathF.Abs(input.Read(data, f));
+                                if (abs > packetPeak) packetPeak = abs;
+                            }
+                        }
+                    }
+                    finally { Check(capture.ReleaseBuffer(frames)); }
+                    Check(capture.GetNextPacketSize(out packet));
+                    if (stop.WaitOne(0)) break;
+                }
+                if (readAny) WasapiMonitoring.UpdatePeak(ref inputPeak, packetPeak);
+            }
+        }
+        catch (Exception error)
+        {
+            if (Volatile.Read(ref disposed) == 0) failed?.Invoke(error);
+        }
+        finally
+        {
+            try
+            {
+                input?.Client.Stop();
+                Release(capture);
+                input?.Dispose();
+                Release(devices);
+            }
+            finally
+            {
+                Volatile.Write(ref inputPeak, 0f);
+                if (mmcss != 0) AvRevertMmThreadCharacteristics(mmcss);
+                if (com) CoUninitialize();
                 lock (stop) { finished.TrySetResult(); stop.Dispose(); }
             }
         }

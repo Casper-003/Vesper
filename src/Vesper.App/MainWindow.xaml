@@ -211,22 +211,10 @@
         </Grid>
         <Grid x:Name="PageStorage" Grid.Row="1" Visibility="Collapsed">
         <Grid x:Name="HomePage" SizeChanged="OnOverviewSizeChanged">
-          <ListView x:Name="HomeOverview" Margin="24,48,24,12" SelectionMode="None" ScrollViewer.IsScrollInertiaEnabled="True" ScrollViewer.IsDeferredScrollingEnabled="False" ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollMode="Enabled" ScrollViewer.VerticalScrollBarVisibility="Hidden" Loaded="OnOverviewLoaded">
+          <ListView x:Name="HomeOverview" Margin="24,48,24,12" SelectionMode="None" HorizontalContentAlignment="Stretch" ScrollViewer.IsScrollInertiaEnabled="True" ScrollViewer.IsDeferredScrollingEnabled="False" ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollMode="Enabled" ScrollViewer.VerticalScrollBarVisibility="Hidden" Loaded="OnOverviewLoaded">
             <ListView.Header><Grid x:Name="HomeHeaderSpace" Height="280"/></ListView.Header>
             <ListView.Footer>
-          <StackPanel>
-          <local:HomeContent x:Name="HomeSections" Margin="0,32,0,24"/>
-          <StackPanel x:Name="HomeLibraryGuide" Margin="0,32,0,32" HorizontalAlignment="Left" MaxWidth="520" Spacing="20" Visibility="{Binding ShowHomeHint, Converter={StaticResource BoolVisibility}}">
-            <FontIcon Glyph="&#xE8F1;" FontSize="48" HorizontalAlignment="Left" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-            <TextBlock Text="还没有可用的歌曲" FontSize="28" FontWeight="SemiBold" TextAlignment="Left" TextWrapping="Wrap"/>
-            <TextBlock Text="先把电脑中的歌曲或 MV 所在文件夹加入曲库。Vesper 会收录其中的本地媒体，文件仍保留在原位置。" FontSize="16" TextWrapping="Wrap" TextAlignment="Left"/>
-            <StackPanel Spacing="14">
-              <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><FontIcon Glyph="&#xE8F1;" FontSize="18" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,3,0,0"/><TextBlock Grid.Column="1" Text="1. 打开左侧导航的“曲库”页面。" FontSize="16" TextWrapping="Wrap"/></Grid>
-              <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><FontIcon Glyph="&#xE8F4;" FontSize="18" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="0,3,0,0"/><TextBlock Grid.Column="1" Text="2. 点击页面右上角的文件夹加号，选择歌曲所在目录。" FontSize="16" TextWrapping="Wrap"/></Grid>
-            </StackPanel>
-            <TextBlock Text="导入后，你可以在曲库中浏览、收藏歌曲，并将它们加入待播。" FontSize="15" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" TextAlignment="Left"/>
-          </StackPanel>
-          </StackPanel>
+              <local:HomeContent x:Name="HomeSections" Margin="0,24,0,28" HorizontalAlignment="Stretch"/>
             </ListView.Footer>
           </ListView>
           <Grid x:Name="HomeHeroLayer" Height="260" VerticalAlignment="Top" IsHitTestVisible="False">
