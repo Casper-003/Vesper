@@ -26,19 +26,14 @@ public sealed partial class MainWindow
         if (closed) return false;
         if (current == request.Key) { CancelPagePreparation(); return false; }
         if (NeedsPagePreparation(request))
-        { BeginPagePreparation(request, () => NavigatePreparedShell(request, fromSidebar)); return true; }
+        { BeginPagePreparation(request, () => NavigatePreparedShell(request)); return true; }
         CancelPagePreparation();
-        return NavigatePreparedShell(request, fromSidebar);
+        return NavigatePreparedShell(request);
     }
 
-    private bool NavigatePreparedShell(ShellNavigationRequest request, bool fromSidebar)
+    private bool NavigatePreparedShell(ShellNavigationRequest request)
     {
-        string? current = (ContentFrame.Content as ShellPage)?.PageKey;
-
-        // Keep Create's established sidebar-only exception. Its independent
-        // sidebar width animation is untouched by this page-navigation policy.
-        bool suppress = fromSidebar && (current == "创作" || request.Key == "创作");
-        NavigationTransitionInfo transition = suppress ? new SuppressNavigationTransitionInfo() : SelectShellTransition(request);
+        var transition = SelectShellTransition(request);
         return ContentFrame.Navigate(typeof(ShellPage), request, transition);
     }
 
@@ -58,7 +53,6 @@ public sealed partial class MainWindow
         }
         // Undo the edge that brought in the page being left. WinUI reverses the
         // selected effect for Back: details leave horizontally, root pages vertically.
-        // Always provide the shared instance, including Create history.
         ContentFrame.GoBack(SelectShellTransition((ContentFrame.Content as ShellPage)?.Request));
         return true;
     }
@@ -76,10 +70,6 @@ public sealed partial class MainWindow
             });
             return true;
         }
-        // GoForward reuses the object installed by GoShellBack. Change that same
-        // object's Effect before WinUI builds the next storyboard; this also works
-        // across consecutive Forward traversals with different axes. A sidebar
-        // Create navigation clears Forward, and the next Back installs this object again.
         SelectShellTransition(ContentFrame.ForwardStack.Last().Parameter as ShellNavigationRequest);
         ContentFrame.GoForward();
         return true;

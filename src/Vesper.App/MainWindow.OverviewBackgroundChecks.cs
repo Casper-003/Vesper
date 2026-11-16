@@ -46,11 +46,11 @@ public sealed partial class MainWindow
         {
             for (int i = 0; i < 60; i++)
                 viewModel.Results.Add(new(new Song($"backdrop-{i}", $"Background check {i}", [])) { MetadataLoaded = true });
-            Navigate("首页"); await Task.Delay(520); Root.UpdateLayout(); ConfigureOverview(HomeOverview);
+            Navigate("曲库"); await Task.Delay(520); Root.UpdateLayout(); ConfigureOverview(LibrarySongs);
             var clock = Stopwatch.StartNew();
-            Point top = HomePage.TransformToVisual(Root).TransformPoint(new Point(200, 20));
-            int[] steady = await Sample(top, "HomeSteady", clock);
-            foreach (string key in new[] { "曲库", "收藏", "首页" })
+            Point top = LibraryPage.TransformToVisual(Root).TransformPoint(new Point(200, 20));
+            int[] steady = await Sample(top, "LibrarySteady", clock);
+            foreach (string key in new[] { "收藏", "曲库" })
             {
                 clock.Restart(); Navigate(key);
                 foreach (int due in new[] { 0, 70, 160, 300, 450 })

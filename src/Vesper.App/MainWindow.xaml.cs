@@ -26,6 +26,8 @@ public sealed partial class MainWindow : Window
     private bool themeApplied, appliedDark;
     private Windows.UI.Color appliedAccent;
     private int themeSignals, themeRepaints;
+    private readonly DispatcherTimer audioPreferenceSaveTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
+    private (bool Segmented, double Bgm, double Vocal) savedAudioPrefs;
 
     public MainWindow()
     {
@@ -52,10 +54,27 @@ public sealed partial class MainWindow : Window
         SetTitleBar(AppTitleBar);
         InitializePreview();
         InitializeSinging(preferences);
-        monitoring = new MonitoringPanel(() => viewModel.Queue.Current is not null || preview.SongId is not null
+        monitoring = new MonitoringPanel(preferences, () => viewModel.Queue.Current is not null || preview.SongId is not null
             || singingEntryRequested || previewEntryRequested);
         AppearanceContent.Children.Add(monitoring);
-        Closed += (_, _) => monitoring.Dispose();
+        savedAudioPrefs = (monitoring.SegmentedLevelMeter, monitoring.BgmVolume, monitoring.VocalVolume);
+        SyncPlaybackVolumes();
+        audioPreferenceSaveTimer.Tick += (_, _) =>
+        {
+            audioPreferenceSaveTimer.Stop();
+            if (!closed && ready) SavePreferences();
+        };
+        monitoring.StateChanged += OnMonitoringStateChanged;
+        Closed += (_, _) =>
+        {
+            if (audioPreferenceSaveTimer.IsEnabled)
+            {
+                audioPreferenceSaveTimer.Stop();
+                if (ready) SavePreferences();
+            }
+            monitoring.StateChanged -= OnMonitoringStateChanged;
+            monitoring.Dispose();
+        };
         InitializeHome();
         AppWindow.TitleBar.ButtonBackgroundColor = Colors.Transparent;
         AppWindow.TitleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
@@ -180,6 +199,26 @@ public sealed partial class MainWindow : Window
     private void OnAccentChanged(object sender, RoutedEventArgs e)
     { if (ready) { ApplyTheme(); SavePreferences(); } }
 
+    private void SyncPlaybackVolumes()
+    {
+        double bgm = Math.Clamp(monitoring.BgmVolume / 100.0, 0, 1);
+        singing.Playback.Volume = bgm;
+        preview.Playback.Volume = bgm;
+    }
+
+    private void OnMonitoringStateChanged()
+    {
+        if (closed) return;
+        SyncPlaybackVolumes();
+        var current = (monitoring.SegmentedLevelMeter, monitoring.BgmVolume, monitoring.VocalVolume);
+        if (ready && current != savedAudioPrefs)
+        {
+            savedAudioPrefs = current;
+            audioPreferenceSaveTimer.Stop();
+            audioPreferenceSaveTimer.Start();
+        }
+    }
+
     private void SavePreferences()
     {
         if (!canSave) return;
@@ -187,9 +226,11 @@ public sealed partial class MainWindow : Window
         {
             Directory.CreateDirectory(Path.GetDirectoryName(preferencesPath)!);
             string temporary = preferencesPath + ".tmp";
+            savedAudioPrefs = (monitoring.SegmentedLevelMeter, monitoring.BgmVolume, monitoring.VocalVolume);
             File.WriteAllText(temporary, JsonSerializer.Serialize(new ShellPreferences(Navigation.IsPaneOpen,
                 SystemAccent.IsChecked == true, viewModel.HideUnavailable, SeekDuringSingingSwitch.IsOn,
-                LinkRightPanelsSwitch.IsOn, rightSplitRatio)));
+                LinkRightPanelsSwitch.IsOn, rightSplitRatio,
+                monitoring.SegmentedLevelMeter, monitoring.BgmVolume, monitoring.VocalVolume)));
             File.Move(temporary, preferencesPath, overwrite: true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -214,7 +255,7 @@ public sealed partial class MainWindow : Window
     {
         if (e.Parameter is not ShellNavigationRequest request) return;
         string page = request.Key;
-        bool showQueue = request.SongId is not null || page != "创作";
+        bool showQueue = request.SongId is not null || (page != "创作" && page != "首页");
         SetQueueSidebarVisible(showQueue);
         if (showQueue) CloseRightPanels();
         changingSelection = true;
@@ -233,6 +274,7 @@ public sealed partial class MainWindow : Window
         BackButton.IsEnabled = ContentFrame.CanGoBack;
         ForwardButton.IsEnabled = ContentFrame.CanGoForward;
         OnSearchPageNavigated(page);
+        UpdateHomeConsoleActiveState();
         DispatcherQueue.TryEnqueue(UpdateTitleLayout);
     }
 

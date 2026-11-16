@@ -24,9 +24,13 @@ public sealed partial class MainWindow
         compactSearchButton = FindSearchPart<Button>(Navigation, "PaneAutoSuggestButton");
         if (compactSearchButton is null) return;
         compactSearchButton.Content = compactSearchGlyph;
+        compactSearchButton.Click -= OnCompactSearchButtonClicked;
+        compactSearchButton.Click += OnCompactSearchButtonClicked;
         Navigation.LayoutUpdated -= OnSearchEntryLayoutUpdated;
         Navigation.LayoutUpdated += OnSearchEntryLayoutUpdated;
     }
+
+    private void OnCompactSearchButtonClicked(object sender, RoutedEventArgs args) => EnterSearchFromUserInput();
 
     private static T? FindSearchPart<T>(DependencyObject root, string name) where T : FrameworkElement
     {

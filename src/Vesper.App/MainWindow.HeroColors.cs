@@ -33,7 +33,7 @@ public sealed partial class MainWindow
             brush.GradientStops[1].Color = HeroColor(palette.Middle);
             brush.GradientStops[2].Color = HeroColor(palette.Bottom);
             PageArea.Background = new SolidColorBrush(HeroColor(palette.Bottom));
-            foreach (var title in new[] { HomeTitleBold, LibraryTitleBold, FavoriteTitleBold, CreationTitleBold })
+            foreach (var title in new[] { LibraryTitleBold, FavoriteTitleBold, CreationTitleBold })
                 title.Foreground = new SolidColorBrush(HeroColor(palette.Foreground));
         }
         foreach (var entity in entityOverviews.Values.Distinct()) entity.ApplyHeroPalette(dark, entity.ArtworkColor);

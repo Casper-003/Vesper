@@ -44,7 +44,7 @@ public sealed partial class MainWindow
                         failures.Add("Collapsed strips must stay blank when the pointer is not hovering over them.");
                     OnQueueRailEntered(QueueOpenButton, null!);
                     AnimateQueueRailContent(.92f);
-                    await Task.Delay(160);
+                    await Task.Delay(240);
                     Root.UpdateLayout();
                     Point collapsedArrow = QueueToggleChevron.TransformToVisual(QueueShell).TransformPoint(new Point(QueueToggleChevron.ActualWidth / 2, QueueToggleChevron.ActualHeight / 2));
                     if (!QueueRailPreviewShown || QueueToggleChevron.Opacity != 1

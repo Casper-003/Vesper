@@ -72,7 +72,7 @@ public sealed partial class SearchResultsView : UserControl
         EntityCards.Visibility = ArtistCard.Visibility = AlbumCard.Visibility = SongHeading.Visibility = MoreSongs.Visibility = Visibility.Collapsed;
         ArtistOpenButton.Tag = AlbumOpenButton.Tag = null;
         anchor = null; savedOrder = []; restorePending = false;
-        ShowStatus(""); versionsFlyout?.Hide();
+        ShowStatus("输入关键词搜索歌曲、艺人或专辑"); versionsFlyout?.Hide();
     }
 
     public void Apply(SearchResponse result, bool restore)

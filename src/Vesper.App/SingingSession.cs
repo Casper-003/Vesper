@@ -81,6 +81,12 @@ internal sealed class SingingSession : IDisposable
 
     internal static async Task<BitmapImage> ReadFirstFrameAsync(string path, CancellationToken token)
     {
+        var (frame, _) = await ReadFirstFrameWithColorAsync(path, token);
+        return frame;
+    }
+
+    internal static async Task<(BitmapImage Frame, uint? Color)> ReadFirstFrameWithColorAsync(string path, CancellationToken token)
+    {
         var file = await StorageFile.GetFileFromPathAsync(Path.GetFullPath(path)).AsTask(token);
         var clip = await MediaClip.CreateFromFileAsync(file).AsTask(token);
         var composition = new MediaComposition();
@@ -89,10 +95,35 @@ internal sealed class SingingSession : IDisposable
         {
             using var frame = await composition.GetThumbnailAsync(TimeSpan.Zero, 1280, 0,
                 VideoFramePrecision.NearestFrame).AsTask(token);
+            byte[] bytes;
+            using (var input = frame.AsStreamForRead())
+            {
+                using var copy = new MemoryStream();
+                await input.CopyToAsync(copy, token);
+                bytes = copy.ToArray();
+            }
+            uint? color = null;
+            try
+            {
+                color = await Task.Run(async () =>
+                {
+                    using var stream = new MemoryStream(bytes).AsRandomAccessStream();
+                    var decoder = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(stream).AsTask(token);
+                    var pixels = await decoder.GetPixelDataAsync(
+                        Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8,
+                        Windows.Graphics.Imaging.BitmapAlphaMode.Straight,
+                        new Windows.Graphics.Imaging.BitmapTransform { ScaledWidth = 64, ScaledHeight = 64 },
+                        Windows.Graphics.Imaging.ExifOrientationMode.IgnoreExifOrientation,
+                        Windows.Graphics.Imaging.ColorManagementMode.DoNotColorManage).AsTask(token);
+                    return CoverPalette.DominantArgb(pixels.DetachPixelData());
+                }, token);
+            }
+            catch { /* Frame color sampling is optional. */ }
+            using var imageStream = new MemoryStream(bytes).AsRandomAccessStream();
             var bitmap = new BitmapImage();
-            await bitmap.SetSourceAsync(frame).AsTask(token);
+            await bitmap.SetSourceAsync(imageStream).AsTask(token);
             token.ThrowIfCancellationRequested();
-            return bitmap;
+            return (bitmap, color);
         }
         finally { composition.Clips.Clear(); }
     }

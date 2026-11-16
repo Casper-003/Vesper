@@ -19,6 +19,8 @@ public sealed partial class MainWindow
     {
         InitializeEntityDetailsPresentation();
         GlobalSearchBox.TextChanged += OnGlobalSearchTextChanged;
+        GlobalSearchBox.GotFocus += OnGlobalSearchGotFocus;
+        GlobalSearchBox.AddHandler(UIElement.PointerPressedEvent, new Microsoft.UI.Xaml.Input.PointerEventHandler((_, _) => EnterSearchFromUserInput()), true);
         GlobalSearchBox.Loaded += (_, _) => AttachSearchInput();
         viewModel.SearchIndexChanged += OnSearchIndexChanged;
         ContentFrame.Navigating += (_, _) =>
@@ -60,6 +62,28 @@ public sealed partial class MainWindow
                 ScheduleSearch(GlobalSearchBox.Text);
         });
     }
+    private void OnGlobalSearchGotFocus(object sender, RoutedEventArgs e)
+    {
+        if (GlobalSearchBox.FocusState is FocusState.Pointer or FocusState.Keyboard
+            || searchTextBox?.FocusState is FocusState.Pointer or FocusState.Keyboard)
+            EnterSearchFromUserInput();
+    }
+
+    private void EnterSearchFromUserInput()
+    {
+        if (!ready || closed || restoringSearchText) return;
+        if ((ContentFrame.Content as ShellPage)?.PageKey == "搜索") return;
+        NavigateShell(new ShellNavigationRequest("搜索", this));
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!closed && (ContentFrame.Content as ShellPage)?.PageKey == "搜索")
+            {
+                var input = searchTextBox ?? FindSearchPart<TextBox>(GlobalSearchBox);
+                input?.Focus(FocusState.Programmatic);
+            }
+        });
+    }
+
     private void OnGlobalSearchTextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
     {
         if (!ready || closed || restoringSearchText || args.Reason == AutoSuggestionBoxTextChangeReason.ProgrammaticChange) return;

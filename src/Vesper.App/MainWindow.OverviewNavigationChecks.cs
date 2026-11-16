@@ -74,7 +74,7 @@ public sealed partial class MainWindow
         ListView? ListFor(string key) => key switch
         {
             "曲库" => LibrarySongs, "收藏" => FavoriteSongs,
-            "首页" => HomeOverview, "创作" => CreationOverview,
+            "创作" => CreationOverview,
             _ => entityFixtures.GetValueOrDefault(key)?.SongList
         };
 
