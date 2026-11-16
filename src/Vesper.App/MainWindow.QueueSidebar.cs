@@ -16,9 +16,29 @@ public sealed partial class MainWindow
     {
         if (queueSidebarVisible == visible) return;
         ResetQueueRailHint();
+        if (!ready || BrowserCards.ActualWidth <= 0)
+        {
+            StopQueueSidebarTransition();
+            StopQueueLayoutTransition();
+            ResetRailPreviews();
+            queueSidebarVisible = visible;
+            singingPanelOpen = false;
+            queuePanelOpen = false;
+            queueAvailabilityTimer.Stop();
+            ClearQueueDrag();
+            UpdateQueueToggle();
+            Grid.SetColumnSpan(BrowserCard, 1);
+            BrowserCard.Margin = new Thickness(0);
+            QueueSidebarSlot.Opacity = visible ? 1 : 0;
+            SettleQueueSidebar();
+            return;
+        }
+
         double from = QueueSidebarSlot.Visibility == Visibility.Visible ? QueueSidebarSlot.ActualWidth : 0;
+        double fromOpacity = QueueSidebarSlot.Visibility == Visibility.Visible ? QueueSidebarSlot.Opacity : 0;
         if (queuePanelOpen && FindChild<ScrollViewer>(QueueSongs) is { } viewer) queueScrollOffset = viewer.VerticalOffset;
         QueueSidebarSlot.Width = from;
+        QueueSidebarSlot.Opacity = fromOpacity;
         StopQueueSidebarTransition();
         StopQueueLayoutTransition();
         ResetRailPreviews();
@@ -38,15 +58,28 @@ public sealed partial class MainWindow
         ApplyQueueSidebarWidth(from, QueueSidebarSlot.ActualHeight);
 
         double target = visible ? QueueSidebarWidth + QueueCardGutter : 0;
+        double targetOpacity = visible ? 1 : 0;
         var storyboard = new Storyboard();
         var width = CreateQueueWidthAnimation(from, target);
         Storyboard.SetTarget(width, QueueSidebarSlot);
         Storyboard.SetTargetProperty(width, nameof(FrameworkElement.Width));
         storyboard.Children.Add(width);
+        var fade = new DoubleAnimation
+        {
+            From = fromOpacity,
+            To = targetOpacity,
+            Duration = TimeSpan.FromMilliseconds(220),
+            EnableDependentAnimation = true,
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut }
+        };
+        Storyboard.SetTarget(fade, QueueSidebarSlot);
+        Storyboard.SetTargetProperty(fade, nameof(UIElement.Opacity));
+        storyboard.Children.Add(fade);
         storyboard.Completed += (_, _) =>
         {
             if (!ReferenceEquals(queueSidebarAnimation, storyboard)) return;
             QueueSidebarSlot.Width = target;
+            QueueSidebarSlot.Opacity = targetOpacity;
             StopQueueSidebarTransition();
             if (!closed) SettleQueueSidebar();
         };
@@ -69,8 +102,6 @@ public sealed partial class MainWindow
 
     private void ApplyQueueSidebarWidth(double width, double height)
     {
-        // Use the same right-anchored reveal as ordinary queue closing. Once the
-        // content is gone, the unscaled rail and its gutter also slide out of view.
         double shellWidth = Math.Max(QueueSidebarWidth, width - QueueCardGutter);
         if (SingingShell.Width != shellWidth) SingingShell.Width = shellWidth;
         if (QueueShell.Width != shellWidth) QueueShell.Width = shellWidth;
@@ -94,6 +125,7 @@ public sealed partial class MainWindow
         SingingShell.Width = double.NaN;
         QueueShell.Width = double.NaN;
         QueueSidebarSlot.Width = queueSidebarVisible ? double.NaN : 0;
+        QueueSidebarSlot.Opacity = queueSidebarVisible ? 1 : 0;
         QueueSidebarSlot.Visibility = queueSidebarVisible ? Visibility.Visible : Visibility.Collapsed;
         QueueSidebarSlot.Clip = null;
         SingingShell.IsHitTestVisible = queueSidebarVisible;

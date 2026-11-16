@@ -18,10 +18,7 @@ public sealed partial class MainWindow
             throw new InvalidOperationException("Search-entry checks require isolated runtime mode with preference writes disabled.");
         bool originalOpen = Navigation.IsPaneOpen;
         string originalText = GlobalSearchBox.Text;
-        var originalSelection = Navigation.SelectedItem;
         var originalPage = ContentFrame.Content;
-        var back = ContentFrame.BackStack.ToArray();
-        var forward = ContentFrame.ForwardStack.ToArray();
         var originalFocus = FocusManager.GetFocusedElement(Root.XamlRoot) as Control;
         var spacing = new List<object>();
         var movement = new List<object>();
@@ -138,17 +135,18 @@ public sealed partial class MainWindow
             for (DependencyObject? node = FocusManager.GetFocusedElement(Root.XamlRoot) as DependencyObject;
                 node is not null; node = VisualTreeHelper.GetParent(node))
                 if (ReferenceEquals(node, GlobalSearchBox)) { focused = true; break; }
-            if (invoked) Check(clicks == 1 && Navigation.IsPaneOpen && focused,
-                "the native compact search Click must expand the pane and focus its input.");
-            Check(GlobalSearchBox.Text == "搜索回归 mixed 123" && ReferenceEquals(Navigation.SelectedItem, originalSelection)
-                && ReferenceEquals(ContentFrame.Content, originalPage) && navigations == 0
-                && ContentFrame.BackStack.SequenceEqual(back) && ContentFrame.ForwardStack.SequenceEqual(forward),
-                "programmatic text changes, pane motion and native search Click must retain input, navigation selection, page and browser history; committed user input is covered by search checks.");
+            if (invoked) Check(clicks == 1 && Navigation.IsPaneOpen && focused && (ContentFrame.Content as ShellPage)?.PageKey == "搜索",
+                "the native compact search Click must expand the pane, switch to search and focus its input.");
+            Check(GlobalSearchBox.Text == "搜索回归 mixed 123" && navigations == (invoked ? 1 : 0)
+                && (invoked ? (ContentFrame.Content as ShellPage)?.PageKey == "搜索" : ReferenceEquals(ContentFrame.Content, originalPage)),
+                "programmatic text changes and pane motion must retain input, while compact search Click switches to the search page.");
         }
         finally
         {
             if (compactSearchButton is not null) compactSearchButton.Click -= OnClicked;
             GlobalSearchBox.Text = originalText;
+            if ((ContentFrame.Content as ShellPage)?.PageKey != (originalPage as ShellPage)?.PageKey && ContentFrame.CanGoBack)
+                ContentFrame.GoBack();
             Navigation.IsPaneOpen = originalOpen;
             await Task.Delay(450);
             originalFocus?.Focus(FocusState.Programmatic);

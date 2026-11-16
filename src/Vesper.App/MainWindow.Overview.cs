@@ -113,8 +113,6 @@ public sealed partial class MainWindow
         if (entityOverviews.TryGetValue(list, out var entity))
             return (entity.PageGrid, entity.HeroLayer, entity.TitleMotionHost, entity.HeroTitle,
                 entity.HeaderSpace, entity.ScrollRail, entity.ScrollBarPart);
-        if (ReferenceEquals(list, HomeOverview))
-            return (HomePage, HomeHeroLayer, HomeTitleMotion, HomeTitleBold, HomeHeaderSpace, HomeScrollRail, HomeScrollBar);
         if (ReferenceEquals(list, CreationOverview))
             return (CreationPage, CreationHeroLayer, CreationTitleMotion, CreationTitleBold, CreationHeaderSpace, CreationScrollRail, CreationScrollBar);
         if (ReferenceEquals(list, FavoriteSongs))
@@ -131,8 +129,7 @@ public sealed partial class MainWindow
         if (song is not null) await LoadDetailsAsync(song);
     }
     private void OnOverviewSizeChanged(object sender, SizeChangedEventArgs e) =>
-        ConfigureOverview(ReferenceEquals(sender, HomePage) ? HomeOverview
-            : ReferenceEquals(sender, CreationPage) ? CreationOverview
+        ConfigureOverview(ReferenceEquals(sender, CreationPage) ? CreationOverview
             : ReferenceEquals(sender, FavoritesPage) ? FavoriteSongs : LibrarySongs);
 
     private void ConfigureOverview(ListView list, bool rebind = false)
@@ -378,7 +375,7 @@ public sealed partial class MainWindow
         {
             stripeRefreshQueued = false;
             if (closed) return;
-            foreach (var list in new[] { LibrarySongs, FavoriteSongs, HomeOverview, CreationOverview }.Concat(entityOverviews.Keys))
+            foreach (var list in new[] { LibrarySongs, FavoriteSongs, CreationOverview }.Concat(entityOverviews.Keys))
             {
                 if (list.ItemsPanelRoot is Panel panel)
                     foreach (var container in panel.Children.OfType<ListViewItem>()) SetRowBrush(container, list.IndexFromContainer(container));

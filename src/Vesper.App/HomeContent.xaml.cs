@@ -1,8 +1,11 @@
+using System.Numerics;
 using Microsoft.UI;
+using Microsoft.UI.Composition;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
@@ -14,31 +17,40 @@ namespace Vesper.App;
 
 public sealed partial class HomeContent : UserControl
 {
-    private const double ResponsiveBreakpoint = 760;
-    private const double UltraNarrowBreakpoint = 520;
+    private const double CompactWidthBreakpoint = 800;
+    private const double CompactHeightBreakpoint = 220;
 
     private readonly MixerVolumeControl vocalControl;
     private readonly MixerVolumeControl bgmControl;
     private readonly MixerLevelMeter micMeter;
     private readonly DispatcherTimer meterTimer = new() { Interval = TimeSpan.FromMilliseconds(33) };
+    private readonly SolidColorBrush greenLedBrush = new(Color.FromArgb(255, 0x22, 0xC5, 0x5E));
+    private readonly SolidColorBrush redLedBrush = new(Color.FromArgb(255, 0xEF, 0x44, 0x44));
+    private readonly SolidColorBrush amberLedBrush = new(Color.FromArgb(255, 0xF5, 0x9E, 0x0B));
 
     private MonitoringPanel? controller;
+    private CompositionRoundedRectangleGeometry? stageClipGeometry;
     private bool syncingFromController;
     private bool homeActive;
-    private bool compactLayout;
-    private bool ultraNarrowLayout;
+    private bool compactControls;
+    private bool stagePointerInside;
+    private bool stageButtonFocused;
+    private bool stageLoading;
     private double smoothedLevel;
     private double peakHoldLevel;
     private int peakHoldTicks;
 
     internal event Action? StartSingingRequested;
 
+    internal ListView QueueList => HomeQueueSongs;
+    internal ContentControl CurrentQueueHost => HomeQueueCurrentContent;
+
     public HomeContent()
     {
         InitializeComponent();
 
-        vocalControl = new MixerVolumeControl("VOCAL LEVEL", "人声音量", Color.FromArgb(255, 0x39, 0xC5, 0xBB));
-        bgmControl = new MixerVolumeControl("BGM LEVEL", "伴奏音量", Color.FromArgb(255, 0x39, 0xC5, 0xBB));
+        vocalControl = new MixerVolumeControl("MIC", "人声音量", Color.FromArgb(255, 0x39, 0xC5, 0xBB));
+        bgmControl = new MixerVolumeControl("BGM", "伴奏音量", Color.FromArgb(255, 0x39, 0xC5, 0xBB));
         micMeter = new MixerLevelMeter();
 
         VocalVolumeHost.Children.Add(vocalControl);
@@ -47,20 +59,42 @@ public sealed partial class HomeContent : UserControl
 
         vocalControl.ValueChanged += value =>
         {
-            if (syncingFromController || controller is null) return;
-            controller.VocalVolume = value;
+            if (!syncingFromController && controller is not null) controller.VocalVolume = value;
         };
         bgmControl.ValueChanged += value =>
         {
-            if (syncingFromController || controller is null) return;
-            controller.BgmVolume = value;
+            if (!syncingFromController && controller is not null) controller.BgmVolume = value;
         };
+
+        ConfigureStageButtonVisuals();
+        StageScreenClip.SizeChanged += OnStageScreenClipSizeChanged;
+        StageEnterButton.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(160) };
+        StageCaptionBar.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(180) };
+        StageAmbientGlow.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(260) };
 
         meterTimer.Tick += OnMeterTick;
         Loaded += OnHomeLoaded;
         Unloaded += OnHomeUnloaded;
         ActualThemeChanged += (_, _) => ApplyVisualTheme();
         ApplyVisualTheme();
+    }
+
+    internal void ConfigureQueue(object itemsSource, DataTemplate itemTemplate, Style itemContainerStyle)
+    {
+        HomeQueueSongs.ItemsSource = itemsSource;
+        HomeQueueSongs.ItemTemplate = itemTemplate;
+        HomeQueueSongs.ItemContainerStyle = itemContainerStyle;
+        HomeQueueCurrentContent.ContentTemplate = itemTemplate;
+    }
+
+    internal void UpdateQueueChrome(QueueSongItem? currentRow, string currentStateText, int pendingCount)
+    {
+        HomeQueueCurrentContent.Content = currentRow;
+        HomeQueueCurrentArea.Visibility = currentRow is null ? Visibility.Collapsed : Visibility.Visible;
+        HomeQueueCurrentState.Text = currentStateText;
+        HomeQueueCount.Text = pendingCount.ToString();
+        HomeQueueEmpty.Visibility = pendingCount == 0 ? Visibility.Visible : Visibility.Collapsed;
+        HomeQueueEmptyTitle.Text = currentRow is null ? "暂无待播" : "暂无后续";
     }
 
     internal void Bind(MonitoringPanel monitoringController)
@@ -96,124 +130,252 @@ public sealed partial class HomeContent : UserControl
         SyncFromController();
     }
 
-    internal void UpdateQueueStatus(int pendingCount, string? currentSongTitle, bool isLoading)
+    internal void SetStagePresentation(ImageSource? image, bool isVideoFrame, string caption, uint? swatchColor,
+        bool hasSong, bool isLoading, bool isPlayingSession)
     {
-        bool activeSession = !string.IsNullOrWhiteSpace(currentSongTitle);
-        DisplayStageSummary.Text = activeSession
-            ? $"演唱中 · {currentSongTitle}"
-            : pendingCount > 0 ? $"待播 {pendingCount} 首" : "暂无待播曲目";
-        DisplayQueueHint.Text = activeSession
-            ? $"待播队列 {pendingCount} 首"
-            : pendingCount > 0 ? $"下一首就绪（共 {pendingCount} 首）" : "进入等待舞台";
+        stageLoading = isLoading;
+        StagePlayGlyph.Visibility = isLoading ? Visibility.Collapsed : Visibility.Visible;
+        StageLoadingRing.IsActive = isLoading;
+        StageLoadingRing.Visibility = isLoading ? Visibility.Visible : Visibility.Collapsed;
+        StageEnterButton.IsEnabled = !isLoading;
 
-        QuickSingLabel.Text = isLoading ? "准备中…" : activeSession ? "返回演唱" : "开始演唱";
-        QuickSingButton.IsEnabled = !isLoading;
+        string actionLabel = isPlayingSession ? "返回演唱" : "开始演唱";
+        ToolTipService.SetToolTip(StageEnterButton, actionLabel);
+        AutomationProperties.SetName(StageEnterButton, actionLabel);
+
+        if (hasSong && image is not null)
+        {
+            StagePreviewImage.Source = image;
+            StagePreviewImage.Stretch = isVideoFrame ? Stretch.UniformToFill : Stretch.Uniform;
+            StagePreviewImage.Margin = isVideoFrame ? new Thickness(0) : new Thickness(20, 14, 20, 26);
+            StagePreviewImage.Visibility = Visibility.Visible;
+            StageLogoPlaceholder.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            StagePreviewImage.Source = null;
+            StagePreviewImage.Visibility = Visibility.Collapsed;
+            StageLogoPlaceholder.Visibility = hasSong ? Visibility.Collapsed : Visibility.Visible;
+        }
+
+        StageCaptionText.Text = hasSong ? caption : "";
+        StageCaptionBar.Opacity = hasSong && !string.IsNullOrWhiteSpace(caption) ? 1 : 0;
+
+        ApplyStageAlbumColor(hasSong ? swatchColor : null, hasSong);
+        RefreshStageEnterButtonVisibility();
     }
+
+    internal Rect? GetStageScreenBounds(UIElement relativeTo)
+    {
+        if (!IsLoaded || StageScreenBorder.ActualWidth < 8 || StageScreenBorder.ActualHeight < 8) return null;
+        return StageScreenBorder.TransformToVisual(relativeTo)
+            .TransformBounds(new Rect(0, 0, StageScreenBorder.ActualWidth, StageScreenBorder.ActualHeight));
+    }
+
+    private void ApplyStageAlbumColor(uint? swatchColor, bool hasSong)
+    {
+        if (!hasSong || swatchColor is not { } argb)
+        {
+            StageAmbientGlow.Opacity = 0;
+            StageColorWash.Opacity = 0;
+            StageScreenBorder.Background = new SolidColorBrush(Color.FromArgb(255, 0x14, 0x16, 0x1B));
+            StageScreenBorder.BorderBrush = new SolidColorBrush(Color.FromArgb(255, 0x2C, 0x30, 0x38));
+            return;
+        }
+
+        byte r = (byte)(argb >> 16);
+        byte g = (byte)(argb >> 8);
+        byte b = (byte)argb;
+
+        byte Blend(byte baseVal, byte target, double factor) =>
+            (byte)Math.Clamp((int)Math.Round(baseVal + (target - baseVal) * factor), 0, 255);
+
+        var topScreen = Color.FromArgb(255, Blend(0x14, r, 0.36), Blend(0x16, g, 0.36), Blend(0x1C, b, 0.36));
+        var midScreen = Color.FromArgb(255, Blend(0x11, r, 0.28), Blend(0x13, g, 0.28), Blend(0x18, b, 0.28));
+        var botScreen = Color.FromArgb(255, Blend(0x0D, r, 0.18), Blend(0x0F, g, 0.18), Blend(0x14, b, 0.18));
+        var screenGrad = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 1) };
+        screenGrad.GradientStops.Add(new GradientStop { Color = topScreen, Offset = 0 });
+        screenGrad.GradientStops.Add(new GradientStop { Color = midScreen, Offset = 0.55 });
+        screenGrad.GradientStops.Add(new GradientStop { Color = botScreen, Offset = 1 });
+        StageScreenBorder.Background = screenGrad;
+        StageScreenBorder.BorderBrush = new SolidColorBrush(Color.FromArgb(165, r, g, b));
+
+        var washBrush = new RadialGradientBrush
+        {
+            MappingMode = BrushMappingMode.RelativeToBoundingBox,
+            Center = new Point(0.5, 0.45),
+            GradientOrigin = new Point(0.5, 0.45),
+            RadiusX = 0.80,
+            RadiusY = 0.80
+        };
+        washBrush.GradientStops.Add(new GradientStop { Color = Color.FromArgb(150, r, g, b), Offset = 0 });
+        washBrush.GradientStops.Add(new GradientStop { Color = Color.FromArgb(52, r, g, b), Offset = 0.65 });
+        washBrush.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0, r, g, b), Offset = 1 });
+        StageColorWash.Background = washBrush;
+        StageColorWash.Opacity = 1;
+
+        var ambientBrush = new RadialGradientBrush
+        {
+            MappingMode = BrushMappingMode.RelativeToBoundingBox,
+            Center = new Point(0.5, 0.5),
+            GradientOrigin = new Point(0.5, 0.5),
+            RadiusX = 0.56,
+            RadiusY = 0.56
+        };
+        ambientBrush.GradientStops.Add(new GradientStop { Color = Color.FromArgb(145, r, g, b), Offset = 0 });
+        ambientBrush.GradientStops.Add(new GradientStop { Color = Color.FromArgb(58, r, g, b), Offset = 0.55 });
+        ambientBrush.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0, r, g, b), Offset = 1 });
+        StageAmbientGlow.Background = ambientBrush;
+        StageAmbientGlow.Opacity = 1;
+    }
+
+    private void ConfigureStageButtonVisuals()
+    {
+        StageEnterButton.Background = SingingView.CreateGlassMaterial();
+        foreach (string state in new[] { "ButtonBackground", "ButtonBackgroundPointerOver", "ButtonBackgroundPressed", "ButtonBackgroundDisabled" })
+            StageEnterButton.Resources[state] = SingingView.CreateGlassMaterial();
+        foreach (string state in new[] { "ButtonBorderBrush", "ButtonBorderBrushPointerOver", "ButtonBorderBrushPressed", "ButtonBorderBrushDisabled" })
+            StageEnterButton.Resources[state] = new SolidColorBrush(Colors.Transparent);
+
+        StageEnterButton.PointerEntered += (_, _) => AnimateStageButtonScale(1.06f);
+        StageEnterButton.PointerExited += (_, _) => AnimateStageButtonScale(1f);
+        StageEnterButton.PointerPressed += (_, _) => AnimateStageButtonScale(.94f);
+        StageEnterButton.PointerReleased += (_, _) => AnimateStageButtonScale(1.06f);
+        StageEnterButton.PointerCanceled += (_, _) => AnimateStageButtonScale(1f);
+        StageEnterButton.PointerCaptureLost += (_, _) => AnimateStageButtonScale(1f);
+    }
+
+    private void AnimateStageButtonScale(float scale)
+    {
+        StageEnterButton.CenterPoint = new Vector3(31, 31, 0);
+        var compositor = ElementCompositionPreview.GetElementVisual(this).Compositor;
+        var animation = compositor.CreateVector3KeyFrameAnimation();
+        animation.Target = "Scale";
+        animation.InsertExpressionKeyFrame(0, "this.StartingValue");
+        animation.InsertKeyFrame(1, new Vector3(scale));
+        animation.Duration = TimeSpan.FromMilliseconds(120);
+        StageEnterButton.StartAnimation(animation);
+    }
+
+    private void OnStageScreenClipSizeChanged(object sender, SizeChangedEventArgs args)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(StageScreenClip);
+        if (stageClipGeometry is null)
+        {
+            stageClipGeometry = visual.Compositor.CreateRoundedRectangleGeometry();
+            stageClipGeometry.CornerRadius = new Vector2(11);
+            visual.Clip = visual.Compositor.CreateGeometricClip(stageClipGeometry);
+        }
+        stageClipGeometry.Size = new Vector2((float)Math.Max(0, args.NewSize.Width), (float)Math.Max(0, args.NewSize.Height));
+    }
+
+    private void OnStagePointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        stagePointerInside = true;
+        RefreshStageEnterButtonVisibility();
+    }
+
+    private void OnStagePointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        var point = e.GetCurrentPoint(StageScreenBorder).Position;
+        if (point.X >= 0 && point.Y >= 0 && point.X <= StageScreenBorder.ActualWidth && point.Y <= StageScreenBorder.ActualHeight) return;
+        stagePointerInside = false;
+        RefreshStageEnterButtonVisibility();
+    }
+
+    private void OnStageButtonFocusChanged(object sender, RoutedEventArgs e)
+    {
+        stageButtonFocused = StageEnterButton.FocusState != FocusState.Unfocused;
+        RefreshStageEnterButtonVisibility();
+    }
+
+    private void RefreshStageEnterButtonVisibility()
+    {
+        bool show = stagePointerInside || stageButtonFocused || stageLoading;
+        StageEnterButton.Opacity = show ? 1 : 0;
+        StageEnterButton.IsHitTestVisible = show;
+    }
+
+    private void OnStageEnterClicked(object sender, RoutedEventArgs e) => StartSingingRequested?.Invoke();
 
     private void OnHomeLoaded(object sender, RoutedEventArgs e)
     {
         ApplyVisualTheme();
-        ApplyResponsiveLayout(ConsoleRoot.ActualWidth);
+        UpdateResponsiveLayout();
         SyncFromController();
         SyncMeterTimer();
     }
 
     private void OnHomeUnloaded(object sender, RoutedEventArgs e)
     {
+        stagePointerInside = stageButtonFocused = false;
+        RefreshStageEnterButtonVisibility();
         meterTimer.Stop();
     }
 
-    private void OnConsoleSizeChanged(object sender, SizeChangedEventArgs e)
+    private void OnConsoleSizeChanged(object sender, SizeChangedEventArgs e) => UpdateResponsiveLayout();
+    private void OnLeftWellSizeChanged(object sender, SizeChangedEventArgs e) => UpdateResponsiveLayout();
+
+    private void OnCenterStageSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        ApplyResponsiveLayout(e.NewSize.Width);
+        double availW = e.NewSize.Width;
+        double availH = e.NewSize.Height;
+        if (availW <= 0 || availH <= 0) return;
+
+        // 留出明显的呼吸外边距，大屏幕不沾满整个中间区域
+        double maxW = Math.Max(160, Math.Min(availW - 44, availW * 0.88));
+        double maxH = Math.Max(90, Math.Min(availH - 36, availH * 0.86));
+        double targetW = Math.Min(maxW, maxH * 16.0 / 9.0);
+        double targetH = targetW * 9.0 / 16.0;
+
+        StageScreenBorder.Width = targetW;
+        StageScreenBorder.Height = targetH;
+        StageAmbientGlow.Width = targetW + 68;
+        StageAmbientGlow.Height = targetH + 56;
     }
 
-    private void ApplyResponsiveLayout(double width)
+    private void UpdateResponsiveLayout()
     {
-        if (width <= 0) return;
-        bool compact = width < ResponsiveBreakpoint;
-        bool ultraNarrow = width < UltraNarrowBreakpoint;
+        double rootWidth = ConsoleRoot.ActualWidth;
+        double wellHeight = LeftFaderWell.ActualHeight;
+        if (rootWidth <= 0) return;
 
-        if (compact != compactLayout)
+        bool narrow = rootWidth < CompactWidthBreakpoint;
+        LeftColumnDef.Width = new GridLength(narrow ? 168 : 228);
+        RightColumnDef.Width = new GridLength(narrow ? 216 : 260);
+        ConsoleRoot.Padding = narrow ? new Thickness(12) : new Thickness(18);
+        ConsoleRoot.ColumnSpacing = narrow ? 10 : 14;
+
+        bool useKnobs = narrow || (wellHeight > 0 && wellHeight < CompactHeightBreakpoint);
+        if (useKnobs != compactControls)
         {
-            compactLayout = compact;
-            vocalControl.CompactMode = compact;
-            bgmControl.CompactMode = compact;
-            micMeter.CompactMode = compact;
+            compactControls = useKnobs;
+            vocalControl.CompactMode = useKnobs;
+            bgmControl.CompactMode = useKnobs;
+            micMeter.CompactMode = useKnobs;
 
-            if (compact)
+            if (useKnobs)
             {
-                ChannelsGrid.ColumnDefinitions[1].Width = new GridLength(0);
-                ChannelsGrid.ColumnSpacing = 0;
-                Grid.SetRow(BgmChannelCard, 1);
-                Grid.SetColumn(BgmChannelCard, 0);
-
-                DisplayDivider1.Visibility = Visibility.Collapsed;
-                DisplayDivider2.Visibility = Visibility.Collapsed;
-                DisplayScreenGrid.ColumnDefinitions[0].Width = new GridLength(1, GridUnitType.Star);
-                DisplayScreenGrid.ColumnDefinitions[1].Width = new GridLength(0);
-                DisplayScreenGrid.ColumnDefinitions[2].Width = new GridLength(0);
-                DisplayScreenGrid.ColumnDefinitions[3].Width = new GridLength(0);
-                DisplayScreenGrid.ColumnDefinitions[4].Width = new GridLength(0);
-                DisplayScreenGrid.ColumnSpacing = 0;
-                Grid.SetRow(DisplayStatusCell, 0); Grid.SetColumn(DisplayStatusCell, 0);
-                Grid.SetRow(DisplayRoutingCell, 1); Grid.SetColumn(DisplayRoutingCell, 0);
-                Grid.SetRow(DisplayActionCell, 2); Grid.SetColumn(DisplayActionCell, 0);
-                DisplayActionCell.HorizontalAlignment = HorizontalAlignment.Stretch;
-                QuickSingButton.HorizontalAlignment = HorizontalAlignment.Stretch;
+                LeftFaderGrid.ColumnDefinitions[2].Width = new GridLength(0);
+                Grid.SetRow(VocalVolumeHost, 0); Grid.SetColumn(VocalVolumeHost, 0); Grid.SetRowSpan(VocalVolumeHost, 1);
+                Grid.SetRow(BgmVolumeHost, 1); Grid.SetColumn(BgmVolumeHost, 0); Grid.SetRowSpan(BgmVolumeHost, 1);
+                Grid.SetRow(MicMeterHost, 0); Grid.SetColumn(MicMeterHost, 1); Grid.SetRowSpan(MicMeterHost, 2);
             }
             else
             {
-                ChannelsGrid.ColumnDefinitions[1].Width = new GridLength(1, GridUnitType.Star);
-                ChannelsGrid.ColumnSpacing = 16;
-                Grid.SetRow(BgmChannelCard, 0);
-                Grid.SetColumn(BgmChannelCard, 1);
-
-                DisplayDivider1.Visibility = Visibility.Visible;
-                DisplayDivider2.Visibility = Visibility.Visible;
-                DisplayScreenGrid.ColumnDefinitions[0].Width = new GridLength(1.2, GridUnitType.Star);
-                DisplayScreenGrid.ColumnDefinitions[1].Width = GridLength.Auto;
-                DisplayScreenGrid.ColumnDefinitions[2].Width = new GridLength(1.2, GridUnitType.Star);
-                DisplayScreenGrid.ColumnDefinitions[3].Width = GridLength.Auto;
-                DisplayScreenGrid.ColumnDefinitions[4].Width = GridLength.Auto;
-                DisplayScreenGrid.ColumnSpacing = 18;
-                Grid.SetRow(DisplayStatusCell, 0); Grid.SetColumn(DisplayStatusCell, 0);
-                Grid.SetRow(DisplayRoutingCell, 0); Grid.SetColumn(DisplayRoutingCell, 2);
-                Grid.SetRow(DisplayActionCell, 0); Grid.SetColumn(DisplayActionCell, 4);
-                DisplayActionCell.HorizontalAlignment = HorizontalAlignment.Right;
-                QuickSingButton.HorizontalAlignment = HorizontalAlignment.Center;
+                LeftFaderGrid.ColumnDefinitions[2].Width = new GridLength(1, GridUnitType.Star);
+                Grid.SetRow(VocalVolumeHost, 0); Grid.SetColumn(VocalVolumeHost, 0); Grid.SetRowSpan(VocalVolumeHost, 1);
+                Grid.SetRow(MicMeterHost, 0); Grid.SetColumn(MicMeterHost, 1); Grid.SetRowSpan(MicMeterHost, 1);
+                Grid.SetRow(BgmVolumeHost, 0); Grid.SetColumn(BgmVolumeHost, 2); Grid.SetRowSpan(BgmVolumeHost, 1);
             }
         }
 
-        if (ultraNarrow != ultraNarrowLayout)
+        if (wellHeight > 0)
         {
-            ultraNarrowLayout = ultraNarrow;
-            if (ultraNarrow)
-            {
-                DeviceSelectorsGrid.ColumnDefinitions[1].Width = new GridLength(0);
-                DeviceSelectorsGrid.ColumnSpacing = 0;
-                Grid.SetRow(OutputDeviceBox, 1);
-                Grid.SetColumn(OutputDeviceBox, 0);
-
-                BgmWellGrid.ColumnDefinitions[0].Width = new GridLength(1, GridUnitType.Star);
-                BgmWellGrid.ColumnDefinitions[1].Width = new GridLength(0);
-                BgmWellGrid.ColumnSpacing = 0;
-                Grid.SetRow(DspRackPanel, 1);
-                Grid.SetColumn(DspRackPanel, 0);
-            }
-            else
-            {
-                DeviceSelectorsGrid.ColumnDefinitions[1].Width = new GridLength(1, GridUnitType.Star);
-                DeviceSelectorsGrid.ColumnSpacing = 12;
-                Grid.SetRow(OutputDeviceBox, 0);
-                Grid.SetColumn(OutputDeviceBox, 1);
-
-                BgmWellGrid.ColumnDefinitions[0].Width = GridLength.Auto;
-                BgmWellGrid.ColumnDefinitions[1].Width = new GridLength(1, GridUnitType.Star);
-                BgmWellGrid.ColumnSpacing = 14;
-                Grid.SetRow(DspRackPanel, 0);
-                Grid.SetColumn(DspRackPanel, 1);
-            }
+            double targetHeight = Math.Max(140, Math.Min(300, wellHeight - 68));
+            vocalControl.SetTrackHeight(targetHeight);
+            bgmControl.SetTrackHeight(targetHeight);
+            micMeter.SetMeterHeight(useKnobs ? Math.Clamp(wellHeight - 54, 130, 220) : targetHeight);
         }
     }
 
@@ -250,18 +412,12 @@ public sealed partial class HomeContent : UserControl
             LowLatencyModeButton.IsEnabled = !controller.IsEnumerating && !controller.IsStarting;
             ExclusiveModeButton.IsEnabled = !controller.IsEnumerating && !controller.IsStarting;
 
-            MonitoringToggleLabel.Text = monitoringActive ? "关闭实时返听"
-                : controller.IsStarting ? "正在准备返听…" : "开启实时返听";
-            MonitoringButtonLed.Fill = new SolidColorBrush(monitoringActive
-                ? Color.FromArgb(255, 0x22, 0xC5, 0x5E)
-                : Color.FromArgb(255, 0xEF, 0x44, 0x44));
-            MonitoringStatusText.Text = controller.StatusText;
-            ModeUsageText.Text = controller.UsageText;
+            MonitoringButtonLed.Fill = monitoringActive ? greenLedBrush : redLedBrush;
+            MonitoringToggleLabel.Text = controller.IsStarting ? "开启中" : "耳返";
 
+            UpdateStatusReadout(monitoringActive, exclusive);
             UpdateModeButtons(exclusive);
-            UpdateDisplayScreen(monitoringActive, exclusive);
             UpdateMonitoringButtonStyle(monitoringActive);
-
             micMeter.Update(smoothedLevel, peakHoldLevel, monitoringActive, controller.IsMeterCapturing);
         }
         finally
@@ -270,53 +426,41 @@ public sealed partial class HomeContent : UserControl
         }
     }
 
-    private void UpdateDisplayScreen(bool monitoringActive, bool exclusive)
+    private void UpdateStatusReadout(bool monitoringActive, bool exclusive)
     {
         if (controller is null) return;
         bool capturing = controller.IsMeterCapturing;
+
         if (monitoringActive)
         {
-            StatusLed.Fill = new SolidColorBrush(Color.FromArgb(255, 0x22, 0xC5, 0x5E));
-            DisplayStatusCode.Text = "LIVE MONITORING";
-            DisplayStatusDetail.Text = "实时耳返已开启 · 人声实时输出中";
+            ParamStatusLed.Fill = greenLedBrush;
+            if (controller.RunningInfo is { } info)
+            {
+                double inMs = info.InputPeriod * 1000d / info.InputRate;
+                double outMs = info.OutputPeriod * 1000d / info.OutputRate;
+                ParamStatusText.Text = $"耳返 · {inMs:F1}/{outMs:F1}ms";
+            }
+            else
+            {
+                ParamStatusText.Text = "耳返中";
+            }
         }
         else if (controller.IsEnumerating || controller.IsStarting)
         {
-            StatusLed.Fill = new SolidColorBrush(Color.FromArgb(255, 0xF5, 0x9E, 0x0B));
-            DisplayStatusCode.Text = "INITIALIZING";
-            DisplayStatusDetail.Text = controller.IsEnumerating ? "正在扫描音频设备…" : "正在准备低延迟引擎…";
+            ParamStatusLed.Fill = amberLedBrush;
+            ParamStatusText.Text = controller.IsEnumerating ? "扫描设备…" : "准备中…";
         }
         else if (capturing)
         {
-            StatusLed.Fill = new SolidColorBrush(Color.FromArgb(255, 0xEF, 0x44, 0x44));
-            DisplayStatusCode.Text = "MIC CHECK";
-            DisplayStatusDetail.Text = "试麦采集中 · 耳返未开（无声输出）";
+            ParamStatusLed.Fill = redLedBrush;
+            ParamStatusText.Text = exclusive ? "试麦 · 独占模式" : "试麦 · 静音";
         }
         else
         {
-            StatusLed.Fill = new SolidColorBrush(controller.SelectedInput is null
-                ? Color.FromArgb(255, 0xF5, 0x9E, 0x0B)
-                : Color.FromArgb(255, 0xEF, 0x44, 0x44));
-            DisplayStatusCode.Text = controller.SelectedInput is null ? "NO INPUT" : "STANDBY";
-            DisplayStatusDetail.Text = controller.StatusText;
+            ParamStatusLed.Fill = controller.SelectedInput is null ? amberLedBrush : redLedBrush;
+            ParamStatusText.Text = controller.StatusText;
         }
-
-        DisplayModeLabel.Text = exclusive ? "独占模式" : "共享低延迟";
-        if (controller.RunningInfo is { } info)
-        {
-            double inMs = info.InputPeriod * 1000d / info.InputRate;
-            double outMs = info.OutputPeriod * 1000d / info.OutputRate;
-            DisplayPeriodText.Text = $"ENGINE: IN {inMs:F1}ms / OUT {outMs:F1}ms";
-        }
-        else
-        {
-            DisplayPeriodText.Text = exclusive
-                ? "ENGINE: EXCLUSIVE DRY MON"
-                : capturing ? "ENGINE: MIC METER ACTIVE" : "ENGINE: STANDBY";
-        }
-
-        DisplayInputName.Text = controller.SelectedInput?.Name ?? "未选择麦克风";
-        DisplayOutputName.Text = controller.SelectedOutput?.Name ?? "未选择输出设备";
+        ToolTipService.SetToolTip(ParamStatusText, controller.StatusText);
     }
 
     private void UpdateModeButtons(bool exclusive)
@@ -442,41 +586,38 @@ public sealed partial class HomeContent : UserControl
         if (controller is not null) controller.SelectedMode = MonitoringMode.Exclusive;
     }
 
-    private void OnQuickSingClicked(object sender, RoutedEventArgs e) => StartSingingRequested?.Invoke();
-
-    // 响应式物理音量推子（宽窗）与旋转旋钮（窄窗）
+    // 响应式物理推子（宽/高窗口）与旋转旋钮（紧凑窗口），固定槽位宽度避免数值变化引起移位
     private sealed class MixerVolumeControl : Grid
     {
-        private const double FaderTravel = 164;
-        private const double FaderTopOffset = 12;
+        private const double FaderTopOffset = 10;
 
-        private readonly string titleText;
         private readonly Color accentColor;
-        private readonly TextBlock titleBlock = new() { FontSize = 11, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center };
-        private readonly TextBlock valueReadout = new() { FontSize = 12, FontFamily = new FontFamily("Consolas"), FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center };
-        private readonly Border readoutPill = new() { CornerRadius = new CornerRadius(5), Padding = new Thickness(8, 3, 8, 3), HorizontalAlignment = HorizontalAlignment.Center, BorderThickness = new Thickness(1) };
+        private readonly TextBlock titleBlock = new() { FontSize = 11, FontFamily = new FontFamily("Consolas"), FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center };
+        private readonly TextBlock valueReadout = new() { FontSize = 11, FontFamily = new FontFamily("Consolas"), FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center };
+        private readonly Border readoutPill = new() { Width = 48, CornerRadius = new CornerRadius(5), Padding = new Thickness(0, 3, 0, 3), HorizontalAlignment = HorizontalAlignment.Center, BorderThickness = new Thickness(1) };
 
         // Fader parts
-        private readonly Grid faderHost = new() { Width = 92, Height = 192 };
-        private readonly Canvas faderTrackCanvas = new() { Width = 44, Height = 188, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Background = new SolidColorBrush(Colors.Transparent) };
-        private readonly Border faderGroove = new() { Width = 6, Height = FaderTravel, CornerRadius = new CornerRadius(3) };
+        private readonly Grid faderHost = new() { Width = 62, Height = 192 };
+        private readonly Canvas scaleCanvas = new() { Width = 24, Height = 188 };
+        private readonly Canvas faderTrackCanvas = new() { Width = 38, Height = 188, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Background = new SolidColorBrush(Colors.Transparent) };
+        private readonly Border faderGroove = new() { Width = 6, Height = 164, CornerRadius = new CornerRadius(3) };
         private readonly Border faderFill = new() { Width = 6, CornerRadius = new CornerRadius(3) };
-        private readonly Border faderCap = new() { Width = 34, Height = 20, CornerRadius = new CornerRadius(4), BorderThickness = new Thickness(1) };
-        private readonly Rectangle faderCapLine = new() { Width = 22, Height = 2, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        private readonly List<TextBlock> scaleLabels = [];
-        private readonly List<Rectangle> tickMarks = [];
+        private readonly Border faderCap = new() { Width = 28, Height = 18, CornerRadius = new CornerRadius(4), BorderThickness = new Thickness(1) };
+        private readonly Rectangle faderCapLine = new() { Width = 18, Height = 2, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        private readonly List<(Rectangle Tick, int Step, bool LeftSide)> tickMarks = [];
 
         // Knob parts
-        private readonly Grid knobHost = new() { Width = 98, Height = 98, Visibility = Visibility.Collapsed, Background = new SolidColorBrush(Colors.Transparent) };
-        private readonly Microsoft.UI.Xaml.Shapes.Path knobTrackArc = new() { StrokeThickness = 4, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round };
-        private readonly Microsoft.UI.Xaml.Shapes.Path knobValueArc = new() { StrokeThickness = 4, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round };
-        private readonly ArcSegment knobValueSegment = new() { Size = new Size(39, 39), SweepDirection = SweepDirection.Clockwise };
-        private readonly Ellipse knobOuter = new() { Width = 56, Height = 56, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, StrokeThickness = 1.5 };
-        private readonly Ellipse knobInner = new() { Width = 46, Height = 46, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        private readonly Grid knobRotor = new() { Width = 56, Height = 56, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        private readonly RotateTransform knobRotate = new() { CenterX = 28, CenterY = 28 };
-        private readonly Rectangle knobPointer = new() { Width = 3, Height = 12, RadiusX = 1.5, RadiusY = 1.5, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 6, 0, 0) };
+        private readonly Grid knobHost = new() { Width = 76, Height = 76, Visibility = Visibility.Collapsed, Background = new SolidColorBrush(Colors.Transparent) };
+        private readonly Microsoft.UI.Xaml.Shapes.Path knobTrackArc = new() { StrokeThickness = 3.5, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round };
+        private readonly Microsoft.UI.Xaml.Shapes.Path knobValueArc = new() { StrokeThickness = 3.5, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round };
+        private readonly ArcSegment knobValueSegment = new() { Size = new Size(30, 30), SweepDirection = SweepDirection.Clockwise };
+        private readonly Ellipse knobOuter = new() { Width = 44, Height = 44, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, StrokeThickness = 1.5 };
+        private readonly Ellipse knobInner = new() { Width = 36, Height = 36, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        private readonly Grid knobRotor = new() { Width = 44, Height = 44, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        private readonly RotateTransform knobRotate = new() { CenterX = 22, CenterY = 22 };
+        private readonly Rectangle knobPointer = new() { Width = 2.5, Height = 9, RadiusX = 1.25, RadiusY = 1.25, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 5, 0, 0) };
 
+        private double faderTravel = 164;
         private double value = 50;
         private bool compact;
         private bool dragging;
@@ -512,18 +653,17 @@ public sealed partial class HomeContent : UserControl
 
         internal MixerVolumeControl(string shortLabel, string accessibleName, Color accentColor)
         {
-            titleText = shortLabel;
             this.accentColor = accentColor;
             IsTabStop = true;
             UseSystemFocusVisuals = true;
             AutomationProperties.SetName(this, accessibleName);
 
-            RowSpacing = 8;
+            RowSpacing = 6;
             RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-            titleBlock.Text = titleText;
+            titleBlock.Text = shortLabel;
             Children.Add(titleBlock);
 
             BuildFader();
@@ -542,53 +682,35 @@ public sealed partial class HomeContent : UserControl
             KeyDown += OnControlKeyDown;
             PointerWheelChanged += OnControlWheelChanged;
             ApplyTheme(true);
-            UpdateVisual();
+            SetTrackHeight(188);
         }
 
         private void BuildFader()
         {
-            faderHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(36) });
-            faderHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(48) });
+            faderHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
+            faderHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(38) });
 
-            var scaleCanvas = new Canvas { Width = 36, Height = 188 };
             for (int step = 0; step <= 10; step++)
             {
-                double y = FaderTopOffset + FaderTravel * (1.0 - step / 10.0);
                 bool major = step % 5 == 0 || step == 2 || step == 8;
-                var tick = new Rectangle { Width = major ? 9 : 5, Height = 1 };
-                Canvas.SetLeft(tick, 36 - tick.Width - 2);
-                Canvas.SetTop(tick, y);
-                scaleCanvas.Children.Add(tick);
-                tickMarks.Add(tick);
+                var leftTick = new Rectangle { Width = major ? 8 : 4, Height = 1 };
+                Canvas.SetLeft(leftTick, 24 - leftTick.Width - 2);
+                scaleCanvas.Children.Add(leftTick);
+                tickMarks.Add((leftTick, step, true));
 
-                if (step is 0 or 2 or 5 or 8 or 10)
-                {
-                    var label = new TextBlock { Text = $"{step * 10}", FontSize = 9, FontFamily = new FontFamily("Consolas") };
-                    Canvas.SetLeft(label, 0);
-                    Canvas.SetTop(label, y - 6);
-                    scaleCanvas.Children.Add(label);
-                    scaleLabels.Add(label);
-                }
+                var rightTick = new Rectangle { Width = step % 5 == 0 ? 6 : 3, Height = 1 };
+                Canvas.SetLeft(rightTick, 26);
+                faderTrackCanvas.Children.Add(rightTick);
+                tickMarks.Add((rightTick, step, false));
             }
             faderHost.Children.Add(scaleCanvas);
 
-            for (int step = 0; step <= 10; step++)
-            {
-                double y = FaderTopOffset + FaderTravel * (1.0 - step / 10.0);
-                bool major = step % 5 == 0;
-                var rightTick = new Rectangle { Width = major ? 7 : 4, Height = 1 };
-                Canvas.SetLeft(rightTick, 30);
-                Canvas.SetTop(rightTick, y);
-                faderTrackCanvas.Children.Add(rightTick);
-                tickMarks.Add(rightTick);
-            }
-
-            Canvas.SetLeft(faderGroove, 19);
+            Canvas.SetLeft(faderGroove, 16);
             Canvas.SetTop(faderGroove, FaderTopOffset);
             faderTrackCanvas.Children.Add(faderGroove);
 
             faderFill.Background = new SolidColorBrush(accentColor);
-            Canvas.SetLeft(faderFill, 19);
+            Canvas.SetLeft(faderFill, 16);
             faderTrackCanvas.Children.Add(faderFill);
 
             faderCap.Child = faderCapLine;
@@ -607,23 +729,23 @@ public sealed partial class HomeContent : UserControl
 
         private void BuildKnob()
         {
-            const double center = 49;
-            const double radius = 39;
+            const double center = 38;
+            const double radius = 30;
 
-            var tickCanvas = new Canvas { Width = 98, Height = 98, IsHitTestVisible = false };
+            var tickCanvas = new Canvas { Width = 76, Height = 76, IsHitTestVisible = false };
             for (int i = 0; i <= 10; i++)
             {
                 double deg = 135.0 + 27.0 * i;
                 double rad = deg * Math.PI / 180.0;
-                double rOuter = 47;
-                double rInner = i % 5 == 0 ? 41 : 43.5;
+                double rOuter = 36.5;
+                double rInner = i % 5 == 0 ? 32 : 33.8;
                 var line = new Line
                 {
                     X1 = center + rInner * Math.Cos(rad),
                     Y1 = center + rInner * Math.Sin(rad),
                     X2 = center + rOuter * Math.Cos(rad),
                     Y2 = center + rOuter * Math.Sin(rad),
-                    StrokeThickness = i % 5 == 0 ? 1.5 : 1
+                    StrokeThickness = i % 5 == 0 ? 1.4 : 1
                 };
                 tickCanvas.Children.Add(line);
             }
@@ -669,9 +791,23 @@ public sealed partial class HomeContent : UserControl
             knobHost.PointerCaptureLost += OnKnobPointerReleased;
         }
 
+        internal void SetTrackHeight(double height)
+        {
+            double travel = Math.Clamp(height - 22, 110, 270);
+            if (Math.Abs(faderTravel - travel) < 0.5) return;
+            faderTravel = travel;
+            faderHost.Height = travel + 22;
+            scaleCanvas.Height = travel + 20;
+            faderTrackCanvas.Height = travel + 20;
+            faderGroove.Height = travel;
+            foreach (var (tick, step, _) in tickMarks)
+                Canvas.SetTop(tick, FaderTopOffset + faderTravel * (1.0 - step / 10.0));
+            UpdateVisual();
+        }
+
         internal void ApplyTheme(bool dark)
         {
-            titleBlock.Foreground = new SolidColorBrush(dark ? Color.FromArgb(255, 0x9A, 0xA3, 0xB2) : Color.FromArgb(255, 0x56, 0x60, 0x70));
+            titleBlock.Foreground = new SolidColorBrush(dark ? Color.FromArgb(255, 0x8E, 0x96, 0xA4) : Color.FromArgb(255, 0x56, 0x60, 0x70));
             readoutPill.Background = new SolidColorBrush(dark ? Color.FromArgb(255, 0x10, 0x13, 0x18) : Color.FromArgb(255, 0xE2, 0xE6, 0xED));
             readoutPill.BorderBrush = new SolidColorBrush(dark ? Color.FromArgb(255, 0x26, 0x2C, 0x36) : Color.FromArgb(255, 0xB6, 0xBE, 0xCA));
             valueReadout.Foreground = new SolidColorBrush(dark ? Color.FromArgb(255, 0xE2, 0xE8, 0xF0) : Color.FromArgb(255, 0x1E, 0x29, 0x3B));
@@ -682,9 +818,7 @@ public sealed partial class HomeContent : UserControl
             faderCapLine.Fill = new SolidColorBrush(dark ? Color.FromArgb(255, 0xE2, 0xE8, 0xF0) : Color.FromArgb(255, 0x2B, 0x30, 0x3A));
 
             var tickBrush = new SolidColorBrush(dark ? Color.FromArgb(255, 0x54, 0x5B, 0x6B) : Color.FromArgb(255, 0x8A, 0x93, 0xA2));
-            foreach (var tick in tickMarks) tick.Fill = tickBrush;
-            var labelBrush = new SolidColorBrush(dark ? Color.FromArgb(255, 0x7A, 0x82, 0x94) : Color.FromArgb(255, 0x56, 0x60, 0x70));
-            foreach (var label in scaleLabels) label.Foreground = labelBrush;
+            foreach (var (tick, _, _) in tickMarks) tick.Fill = tickBrush;
 
             knobTrackArc.Stroke = new SolidColorBrush(dark ? Color.FromArgb(255, 0x2A, 0x2E, 0x38) : Color.FromArgb(255, 0xC2, 0xC8, 0xD4));
             knobOuter.Fill = new SolidColorBrush(dark ? Color.FromArgb(255, 0x26, 0x29, 0x31) : Color.FromArgb(255, 0xE6, 0xEA, 0xF0));
@@ -703,10 +837,10 @@ public sealed partial class HomeContent : UserControl
 
             if (!compact)
             {
-                double fillHeight = FaderTravel * t;
+                double fillHeight = faderTravel * t;
                 faderFill.Height = fillHeight;
-                Canvas.SetTop(faderFill, FaderTopOffset + FaderTravel - fillHeight);
-                double capCenterY = FaderTopOffset + FaderTravel * (1.0 - t);
+                Canvas.SetTop(faderFill, FaderTopOffset + faderTravel - fillHeight);
+                double capCenterY = FaderTopOffset + faderTravel * (1.0 - t);
                 Canvas.SetTop(faderCap, capCenterY - faderCap.Height / 2);
             }
             else
@@ -721,7 +855,7 @@ public sealed partial class HomeContent : UserControl
                     knobValueArc.Visibility = Visibility.Visible;
                     double sweepDeg = 270.0 * t;
                     double endRad = (135.0 + sweepDeg) * Math.PI / 180.0;
-                    knobValueSegment.Point = new Point(49 + 39 * Math.Cos(endRad), 49 + 39 * Math.Sin(endRad));
+                    knobValueSegment.Point = new Point(38 + 30 * Math.Cos(endRad), 38 + 30 * Math.Sin(endRad));
                     knobValueSegment.IsLargeArc = sweepDeg > 180.0;
                 }
             }
@@ -761,7 +895,7 @@ public sealed partial class HomeContent : UserControl
 
         private void UpdateFaderFromPoint(double y)
         {
-            double ratio = 1.0 - (y - FaderTopOffset) / FaderTravel;
+            double ratio = 1.0 - (y - FaderTopOffset) / faderTravel;
             SetUserValue(ratio * 100.0);
         }
 
@@ -813,23 +947,20 @@ public sealed partial class HomeContent : UserControl
         }
     }
 
-    // 实时麦克风电平灯柱：支持未开耳返红色／开启耳返绿色，以及分段 LED／连续平滑双样式
+    // 实时麦克风电平灯柱：未开耳返红色／开启耳返绿色，支持分段 LED 与连续平滑光条
     private sealed class MixerLevelMeter : Grid
     {
         private const int SegmentCount = 16;
 
-        private readonly Ellipse stateDot = new() { Width = 7, Height = 7, VerticalAlignment = VerticalAlignment.Center };
-        private readonly TextBlock stateLabel = new() { FontSize = 11, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
-        private readonly Border meterWell = new() { Width = 38, Height = 188, CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1), Padding = new Thickness(5) };
+        private readonly TextBlock titleBlock = new() { Text = "电平", FontSize = 11, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center };
+        private readonly Border meterWell = new() { Width = 34, Height = 188, CornerRadius = new CornerRadius(6), BorderThickness = new Thickness(1), Padding = new Thickness(4) };
         private readonly Grid segmentedGrid = new() { RowSpacing = 2 };
         private readonly Border[] segments = new Border[SegmentCount];
         private readonly Grid smoothHost = new() { Visibility = Visibility.Collapsed };
         private readonly Border smoothBar = new() { VerticalAlignment = VerticalAlignment.Bottom, HorizontalAlignment = HorizontalAlignment.Stretch, CornerRadius = new CornerRadius(3), Height = 0 };
         private readonly Border peakLine = new() { VerticalAlignment = VerticalAlignment.Bottom, HorizontalAlignment = HorizontalAlignment.Stretch, Height = 2, CornerRadius = new CornerRadius(1), Visibility = Visibility.Collapsed };
-        private readonly Canvas scaleCanvas = new() { Width = 28, Height = 188 };
-        private readonly List<TextBlock> dbLabels = [];
-        private readonly Border dbPill = new() { CornerRadius = new CornerRadius(5), Padding = new Thickness(8, 3, 8, 3), HorizontalAlignment = HorizontalAlignment.Center, BorderThickness = new Thickness(1) };
-        private readonly TextBlock dbReadout = new() { Text = "-∞ dB", FontSize = 12, FontFamily = new FontFamily("Consolas"), FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center };
+        private readonly Border dbPill = new() { Width = 48, CornerRadius = new CornerRadius(5), Padding = new Thickness(0, 3, 0, 3), HorizontalAlignment = HorizontalAlignment.Center, BorderThickness = new Thickness(1) };
+        private readonly TextBlock dbReadout = new() { Text = "-∞", FontSize = 11, FontFamily = new FontFamily("Consolas"), FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center };
 
         private readonly SolidColorBrush greenPrimaryBrush = new(Color.FromArgb(255, 0x22, 0xC5, 0x5E));
         private readonly SolidColorBrush greenTopBrush = new(Color.FromArgb(255, 0x4A, 0xDE, 0x80));
@@ -847,10 +978,8 @@ public sealed partial class HomeContent : UserControl
             Color.FromArgb(255, 0xB9, 0x1C, 0x1C), Color.FromArgb(255, 0xEF, 0x44, 0x44), Color.FromArgb(255, 0xF8, 0x71, 0x71));
 
         private bool segmented = true;
-        private bool compact;
-        private bool isDark = true;
         private double lastLevel, lastPeak;
-        private bool lastMonitoring, lastCapturing;
+        private bool lastMonitoring;
 
         private static LinearGradientBrush CreateSmoothBrush(Color deep, Color primary, Color top)
         {
@@ -870,37 +999,21 @@ public sealed partial class HomeContent : UserControl
                 segmented = value;
                 segmentedGrid.Visibility = segmented ? Visibility.Visible : Visibility.Collapsed;
                 smoothHost.Visibility = segmented ? Visibility.Collapsed : Visibility.Visible;
-                Update(lastLevel, lastPeak, lastMonitoring, lastCapturing);
+                Update(lastLevel, lastPeak, lastMonitoring, true);
             }
         }
 
-        internal bool CompactMode
-        {
-            get => compact;
-            set
-            {
-                if (compact == value) return;
-                compact = value;
-                double targetHeight = compact ? 132 : 188;
-                meterWell.Height = targetHeight;
-                scaleCanvas.Height = targetHeight;
-                LayoutScaleLabels(targetHeight);
-                Update(lastLevel, lastPeak, lastMonitoring, lastCapturing);
-            }
-        }
+        internal bool CompactMode { get; set; }
 
         internal MixerLevelMeter()
         {
-            RowSpacing = 8;
+            RowSpacing = 6;
             RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             AutomationProperties.SetName(this, "实时麦克风电平表");
 
-            var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Center };
-            header.Children.Add(stateDot);
-            header.Children.Add(stateLabel);
-            Children.Add(header);
+            Children.Add(titleBlock);
 
             for (int i = 0; i < SegmentCount; i++)
             {
@@ -919,19 +1032,8 @@ public sealed partial class HomeContent : UserControl
             wellContent.Children.Add(smoothHost);
             meterWell.Child = wellContent;
 
-            foreach (string labelText in new[] { "0", "-12", "-24", "-36", "-52" })
-            {
-                var text = new TextBlock { Text = labelText, FontSize = 9, FontFamily = new FontFamily("Consolas"), TextAlignment = TextAlignment.Right, Width = 24 };
-                scaleCanvas.Children.Add(text);
-                dbLabels.Add(text);
-            }
-            LayoutScaleLabels(188);
-
-            var body = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-            body.Children.Add(scaleCanvas);
-            body.Children.Add(meterWell);
-            SetRow(body, 1);
-            Children.Add(body);
+            SetRow(meterWell, 1);
+            Children.Add(meterWell);
 
             dbPill.Child = dbReadout;
             SetRow(dbPill, 2);
@@ -941,29 +1043,23 @@ public sealed partial class HomeContent : UserControl
             Update(0, 0, false, false);
         }
 
-        private void LayoutScaleLabels(double height)
+        internal void SetMeterHeight(double height)
         {
-            double usable = Math.Max(40, height - 14);
-            double[] positions = [0, 0.23, 0.46, 0.69, 1.0];
-            for (int i = 0; i < dbLabels.Count; i++)
-            {
-                Canvas.SetLeft(dbLabels[i], 0);
-                Canvas.SetTop(dbLabels[i], 2 + usable * positions[i]);
-            }
+            double targetHeight = Math.Clamp(height, 120, 290);
+            if (Math.Abs(meterWell.Height - targetHeight) < 0.5) return;
+            meterWell.Height = targetHeight;
+            Update(lastLevel, lastPeak, lastMonitoring, true);
         }
 
         internal void ApplyTheme(bool dark)
         {
-            isDark = dark;
+            titleBlock.Foreground = new SolidColorBrush(dark ? Color.FromArgb(255, 0x8E, 0x96, 0xA4) : Color.FromArgb(255, 0x56, 0x60, 0x70));
             meterWell.Background = new SolidColorBrush(Color.FromArgb(255, 0x0F, 0x12, 0x16));
             meterWell.BorderBrush = new SolidColorBrush(dark ? Color.FromArgb(255, 0x2B, 0x30, 0x3A) : Color.FromArgb(255, 0x9B, 0xA3, 0xB2));
             dbPill.Background = new SolidColorBrush(dark ? Color.FromArgb(255, 0x10, 0x13, 0x18) : Color.FromArgb(255, 0xE2, 0xE6, 0xED));
             dbPill.BorderBrush = new SolidColorBrush(dark ? Color.FromArgb(255, 0x26, 0x2C, 0x36) : Color.FromArgb(255, 0xB6, 0xBE, 0xCA));
             dbReadout.Foreground = new SolidColorBrush(dark ? Color.FromArgb(255, 0xE2, 0xE8, 0xF0) : Color.FromArgb(255, 0x1E, 0x29, 0x3B));
-
-            var labelBrush = new SolidColorBrush(dark ? Color.FromArgb(255, 0x7A, 0x82, 0x94) : Color.FromArgb(255, 0x56, 0x60, 0x70));
-            foreach (var label in dbLabels) label.Foreground = labelBrush;
-            Update(lastLevel, lastPeak, lastMonitoring, lastCapturing);
+            Update(lastLevel, lastPeak, lastMonitoring, true);
         }
 
         internal void Update(double level, double peakHold, bool monitoringActive, bool capturing)
@@ -971,7 +1067,6 @@ public sealed partial class HomeContent : UserControl
             lastLevel = level = Math.Clamp(level, 0, 1);
             lastPeak = peakHold = Math.Clamp(peakHold, 0, 1);
             lastMonitoring = monitoringActive;
-            lastCapturing = capturing;
 
             var primaryBrush = monitoringActive ? greenPrimaryBrush : redPrimaryBrush;
             var topBrush = monitoringActive ? greenTopBrush : redTopBrush;
@@ -979,13 +1074,7 @@ public sealed partial class HomeContent : UserControl
             var peakBrush = monitoringActive ? greenPeakBrush : redPeakBrush;
             var unlitBrush = monitoringActive ? greenUnlitBrush : redUnlitBrush;
 
-            stateDot.Fill = primaryBrush;
-            stateLabel.Text = monitoringActive ? "耳返 · 出声" : capturing ? "试麦 · 静音" : "试麦 · 待机";
-            stateLabel.Foreground = monitoringActive
-                ? (isDark ? greenTopBrush : greenDeepBrush)
-                : (isDark ? redTopBrush : redDeepBrush);
-
-            dbReadout.Text = level <= 0.005 ? "-∞ dB" : $"{Math.Round(-52.0 * (1.0 - level)):0} dB";
+            dbReadout.Text = level <= 0.005 ? "-∞" : $"{Math.Round(-52.0 * (1.0 - level)):0}dB";
 
             if (segmented)
             {
@@ -1002,7 +1091,7 @@ public sealed partial class HomeContent : UserControl
             }
             else
             {
-                double innerHeight = Math.Max(20, meterWell.Height - 12);
+                double innerHeight = Math.Max(20, meterWell.Height - 10);
                 smoothBar.Height = innerHeight * level;
                 smoothBar.Background = monitoringActive ? greenSmoothBrush : redSmoothBrush;
 

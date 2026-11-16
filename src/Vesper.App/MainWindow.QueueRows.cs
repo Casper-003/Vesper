@@ -43,9 +43,11 @@ public sealed partial class MainWindow
 
     private IEnumerable<SongRowSurface> RealizedQueueRowSurfaces()
     {
-        if (QueueSongs.ItemsPanelRoot is Panel panel)
-            foreach (var item in panel.Children.OfType<ListViewItem>())
-                if (item.ContentTemplateRoot is SongRowSurface surface) yield return surface;
+        foreach (var list in new[] { QueueSongs, HomeSections.QueueList })
+            if (list.ItemsPanelRoot is Panel panel)
+                foreach (var item in panel.Children.OfType<ListViewItem>())
+                    if (item.ContentTemplateRoot is SongRowSurface surface) yield return surface;
         if (FindChild<SongRowSurface>(QueueCurrentContent) is { } current) yield return current;
+        if (FindChild<SongRowSurface>(HomeSections.CurrentQueueHost) is { } homeCurrent) yield return homeCurrent;
     }
 }

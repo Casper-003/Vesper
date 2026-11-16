@@ -37,6 +37,12 @@ public sealed partial class MainWindow
         InitializeRightPanelFades();
         QueueSongs.ItemsSource = queueRows;
         QueueSongs.ContainerContentChanging += OnQueueContainerChanging;
+        HomeSections.ConfigureQueue(queueRows, (DataTemplate)Root.Resources["QueueRowTemplate"], (Style)Root.Resources["SongRowStyle"]);
+        HomeSections.QueueList.ContainerContentChanging += OnQueueContainerChanging;
+        HomeSections.QueueList.PointerMoved += OnQueueDragPointerMoved;
+        HomeSections.QueueList.PointerReleased += OnQueueDragPointerReleased;
+        HomeSections.QueueList.PointerCanceled += OnQueueDragPointerCanceled;
+        HomeSections.QueueList.PointerCaptureLost += OnQueueDragPointerCaptureLost;
         viewModel.Queue.Pending.CollectionChanged += OnQueueCollectionChanged;
         viewModel.Queue.PropertyChanged += OnQueueStateChanged;
         viewModel.PropertyChanged += OnQueueLibraryChanged;
@@ -97,6 +103,11 @@ public sealed partial class MainWindow
         viewModel.Queue.Pending.CollectionChanged -= OnQueueCollectionChanged;
         viewModel.Queue.PropertyChanged -= OnQueueStateChanged;
         viewModel.PropertyChanged -= OnQueueLibraryChanged;
+        HomeSections.QueueList.ContainerContentChanging -= OnQueueContainerChanging;
+        HomeSections.QueueList.PointerMoved -= OnQueueDragPointerMoved;
+        HomeSections.QueueList.PointerReleased -= OnQueueDragPointerReleased;
+        HomeSections.QueueList.PointerCanceled -= OnQueueDragPointerCanceled;
+        HomeSections.QueueList.PointerCaptureLost -= OnQueueDragPointerCaptureLost;
         AppWindow.Closing -= OnQueueWindowClosing;
         foreach (var row in queueRows) row.Dispose();
         currentQueueRow?.Dispose();
@@ -145,7 +156,8 @@ public sealed partial class MainWindow
         UpdateQueueToggle();
         QueueEmpty.Visibility = pending.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         QueueEmptyTitle.Text = currentQueueRow is null ? "暂无待播" : "暂无后续歌曲";
-        if (queuePanelOpen) _ = CheckQueueAvailabilityAsync();
+        HomeSections.UpdateQueueChrome(currentQueueRow, QueueCurrentState.Text, pending.Count);
+        if (queuePanelOpen || (ContentFrame.Content as ShellPage)?.PageKey == "首页") _ = CheckQueueAvailabilityAsync();
         ScheduleQueueRowSurfaceRefresh();
     }
 
@@ -188,7 +200,6 @@ public sealed partial class MainWindow
 
     private void UpdateQueueToggle()
     {
-        // Expanded cards have no left rail: the strip only exists while collapsed.
         SingingRailHost.Visibility = singingPanelOpen ? Visibility.Collapsed : Visibility.Visible;
         QueueRailHost.Visibility = queuePanelOpen ? Visibility.Collapsed : Visibility.Visible;
         if (singingPanelOpen) singingRailPreview = false;

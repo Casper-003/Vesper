@@ -21,11 +21,21 @@ public sealed partial class MainWindow
     private Point queueDragPressPoint, queueDragLastPoint, queueDragGrabOffset;
     private ContentControl? queueDragFloating;
     private ScrollViewer? queueDragViewer;
+    private ListView? queueDragList;
     private bool queueDragActive;
     private double queueDragScroll;
     private long queueDragScrollTime;
     private const double QueueDragMotionMilliseconds = 140;
     private readonly record struct QueueDragMotion(double From, long Started);
+
+    private ListView ActiveQueueList => queueDragList ?? QueueSongs;
+
+    private static T? FindAncestor<T>(DependencyObject element) where T : DependencyObject
+    {
+        for (DependencyObject? current = element; current is not null; current = VisualTreeHelper.GetParent(current))
+            if (current is T match) return match;
+        return null;
+    }
 
     private void InitializeQueueDrag() => queueDragTimer.Tick += OnQueueDragScrollTick;
 
@@ -33,12 +43,15 @@ public sealed partial class MainWindow
     {
         if (queueDragPointer is not null || queueDragActive
             || sender is not ContentControl { DataContext: QueueSongItem { IsPending: true } row } handle) return;
-        var point = args.GetCurrentPoint(QueueSongs);
+        var owner = FindAncestor<ListView>(handle);
+        if (owner is null) return;
+        var point = args.GetCurrentPoint(owner);
         if (point.Properties.IsRightButtonPressed || point.Properties.IsMiddleButtonPressed
             || !(point.Properties.IsLeftButtonPressed || point.IsInContact)) return;
         handle.Focus(FocusState.Pointer);
         args.Handled = true;
-        if (!QueueSongs.CapturePointer(args.Pointer)) return;
+        if (!owner.CapturePointer(args.Pointer)) return;
+        queueDragList = owner;
         queueDragPointer = args.Pointer;
         queueDragId = row.Entry.Id;
         queueDragPressPoint = queueDragLastPoint = point.Position;
@@ -47,7 +60,7 @@ public sealed partial class MainWindow
     private void OnQueueDragPointerMoved(object sender, PointerRoutedEventArgs args)
     {
         if (queueDragPointer?.PointerId != args.Pointer.PointerId) return;
-        Point point = args.GetCurrentPoint(QueueSongs).Position;
+        Point point = args.GetCurrentPoint(ActiveQueueList).Position;
         queueDragLastPoint = point;
         args.Handled = true;
         if (!queueDragActive)
@@ -56,7 +69,7 @@ public sealed partial class MainWindow
             double dy = queueDragLastPoint.Y - queueDragPressPoint.Y;
             if (dx * dx + dy * dy < 16) return;
             var row = queueRows.FirstOrDefault(item => item.Entry.Id == queueDragId);
-            Point origin = QueueSongs.TransformToVisual(Root).TransformPoint(queueDragPressPoint);
+            Point origin = ActiveQueueList.TransformToVisual(Root).TransformPoint(queueDragPressPoint);
             if (row is null || !StartQueueDragPreview(row, origin)) { CancelQueueDrag(); return; }
         }
         UpdateQueueDragPointer(point);
@@ -65,7 +78,7 @@ public sealed partial class MainWindow
     private void OnQueueDragPointerReleased(object sender, PointerRoutedEventArgs args)
     {
         if (queueDragPointer?.PointerId != args.Pointer.PointerId) return;
-        Point point = args.GetCurrentPoint(QueueSongs).Position;
+        Point point = args.GetCurrentPoint(ActiveQueueList).Position;
         args.Handled = true;
         if (queueDragActive) UpdateQueueDragPointer(point);
         FinishQueueDrag(IsInsideQueueDragViewport(point));
@@ -88,15 +101,15 @@ public sealed partial class MainWindow
     private bool StartQueueDragPreview(QueueSongItem row, Point rootPoint)
     {
         if (closed || queueDragActive || !row.IsPending || !queueRows.Contains(row)
-            || QueueSongs.ContainerFromItem(row) is not ListViewItem container) return false;
+            || ActiveQueueList.ContainerFromItem(row) is not ListViewItem container) return false;
         queueDragId = row.Entry.Id;
         queueDragActive = true;
-        queueDragViewer = FindChild<ScrollViewer>(QueueSongs);
+        queueDragViewer = FindChild<ScrollViewer>(ActiveQueueList);
         if (container.ContentTemplateRoot is FrameworkElement source && source.FindName("QueueTitleViewport") is Grid titleHost)
             ResetQueueTitle(titleHost);
         Point topLeft = container.TransformToVisual(Root).TransformPoint(default);
         queueDragGrabOffset = new(rootPoint.X - topLeft.X, rootPoint.Y - topLeft.Y);
-        queueDragLastPoint = Root.TransformToVisual(QueueSongs).TransformPoint(rootPoint);
+        queueDragLastPoint = Root.TransformToVisual(ActiveQueueList).TransformPoint(rootPoint);
         queueDragFloating = new ContentControl
         {
             Content = row, DataContext = row, ContentTemplate = (DataTemplate)Root.Resources["QueueRowTemplate"],
@@ -128,21 +141,21 @@ public sealed partial class MainWindow
         PositionQueueDragFloating(point);
         bool inside = IsInsideQueueDragViewport(point);
         if (inside) MoveQueueDragPreview(QueueDragTargetIndex(point.Y));
-        double edge = Math.Min(40, QueueSongs.ActualHeight / 3);
+        double edge = Math.Min(40, ActiveQueueList.ActualHeight / 3);
         queueDragScroll = !inside || edge <= 0 ? 0
             : point.Y < edge ? -450 * (edge - point.Y) / edge
-            : point.Y > QueueSongs.ActualHeight - edge ? 450 * (point.Y - QueueSongs.ActualHeight + edge) / edge : 0;
+            : point.Y > ActiveQueueList.ActualHeight - edge ? 450 * (point.Y - ActiveQueueList.ActualHeight + edge) / edge : 0;
         if (queueDragScroll == 0) queueDragTimer.Stop();
         else if (!queueDragTimer.IsEnabled) { queueDragScrollTime = Stopwatch.GetTimestamp(); queueDragTimer.Start(); }
     }
 
     private bool IsInsideQueueDragViewport(Point point) => point.X >= 0 && point.Y >= 0
-        && point.X <= QueueSongs.ActualWidth && point.Y <= QueueSongs.ActualHeight;
+        && point.X <= ActiveQueueList.ActualWidth && point.Y <= ActiveQueueList.ActualHeight;
 
     private void PositionQueueDragFloating(Point point)
     {
         if (queueDragFloating is null) return;
-        Point position = QueueSongs.TransformToVisual(QueueFlightLayer).TransformPoint(point);
+        Point position = ActiveQueueList.TransformToVisual(QueueFlightLayer).TransformPoint(point);
         Canvas.SetLeft(queueDragFloating, position.X - queueDragGrabOffset.X);
         Canvas.SetTop(queueDragFloating, position.Y - queueDragGrabOffset.Y);
     }
@@ -182,11 +195,11 @@ public sealed partial class MainWindow
         queueRows.Move(from, targetIndex);
         for (int i = Math.Min(from, targetIndex); i <= Math.Max(from, targetIndex); i++) queueRows[i].SetPosition(i + 1);
         ScheduleQueueRowSurfaceRefresh();
-        QueueSongs.UpdateLayout();
+        ActiveQueueList.UpdateLayout();
         if (scrollOffset is { } targetScroll && queueDragViewer is not null && Math.Abs(queueDragViewer.VerticalOffset - targetScroll) > .5)
         {
             queueDragViewer.ChangeView(null, targetScroll, null, true);
-            QueueSongs.UpdateLayout();
+            ActiveQueueList.UpdateLayout();
         }
         foreach (var container in RealizedQueueDragContainers())
         {
@@ -199,14 +212,14 @@ public sealed partial class MainWindow
         return true;
     }
 
-    private IEnumerable<ListViewItem> RealizedQueueDragContainers() => QueueSongs.ItemsPanelRoot is Panel panel
+    private IEnumerable<ListViewItem> RealizedQueueDragContainers() => ActiveQueueList.ItemsPanelRoot is Panel panel
         ? panel.Children.OfType<ListViewItem>().Where(container => container.Content is QueueSongItem) : [];
 
     private double QueueDragLayoutTop(ListViewItem container)
     {
         // Read the panel's layout slot, not the container's animated composition transform.
         double y = LayoutInformation.GetLayoutSlot(container).Y + container.Margin.Top;
-        return QueueSongs.ItemsPanelRoot.TransformToVisual(QueueSongs).TransformPoint(new Point(0, y)).Y;
+        return ActiveQueueList.ItemsPanelRoot.TransformToVisual(ActiveQueueList).TransformPoint(new Point(0, y)).Y;
     }
 
     private double QueueDragMotionOffset(Guid id, long now)
@@ -260,7 +273,7 @@ public sealed partial class MainWindow
         double offset = Math.Clamp(viewer.VerticalOffset + queueDragScroll * dt, 0, viewer.ScrollableHeight);
         if (Math.Abs(offset - viewer.VerticalOffset) < .1) { queueDragTimer.Stop(); return; }
         viewer.ChangeView(null, offset, null, true);
-        QueueSongs.UpdateLayout();
+        ActiveQueueList.UpdateLayout();
         MoveQueueDragPreview(QueueDragTargetIndex(queueDragLastPoint.Y));
     }
 
@@ -271,8 +284,9 @@ public sealed partial class MainWindow
         bool wasActive = queueDragActive;
         int target = id is null ? -1 : queueRows.ToList().FindIndex(row => row.Entry.Id == id);
         var pointer = queueDragPointer;
+        var owner = ActiveQueueList;
         // Clear capture state before ReleasePointerCapture raises PointerCaptureLost.
-        queueDragPointer = null; queueDragId = null; queueDragActive = false;
+        queueDragPointer = null; queueDragId = null; queueDragActive = false; queueDragList = null;
         queueDragTimer.Stop(); queueDragScroll = 0; queueDragViewer = null;
         if (!closed && queueDragFloating is { } floating) QueueFlightLayer.Children.Remove(floating);
         queueDragFloating = null;
@@ -280,7 +294,7 @@ public sealed partial class MainWindow
             foreach (var container in queueDragContainers.Keys)
             { container.Opacity = 1; ResetQueueDragContainerTranslation(container); }
         queueDragContainers.Clear(); queueDragMotions.Clear();
-        if (!closed && pointer is not null) QueueSongs.ReleasePointerCapture(pointer);
+        if (!closed && pointer is not null) owner.ReleasePointerCapture(pointer);
         bool moved = wasActive && commit && id is { } entryId && target >= 0
             && viewModel.Queue.MovePending(entryId, target);
         if (wasActive && !moved && refresh && !closed) RefreshQueuePresentation();

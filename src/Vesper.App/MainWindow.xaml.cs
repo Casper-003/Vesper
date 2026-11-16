@@ -255,7 +255,7 @@ public sealed partial class MainWindow : Window
     {
         if (e.Parameter is not ShellNavigationRequest request) return;
         string page = request.Key;
-        bool showQueue = request.SongId is not null || page != "创作";
+        bool showQueue = request.SongId is not null || (page != "创作" && page != "首页");
         SetQueueSidebarVisible(showQueue);
         if (showQueue) CloseRightPanels();
         changingSelection = true;

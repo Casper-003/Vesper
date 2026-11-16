@@ -1,10 +1,12 @@
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Navigation;
 
 namespace Vesper.App;
 
 public sealed record ShellNavigationRequest(string Key, MainWindow Host, string? SongId = null,
-    string? EntityId = null, bool IsAlbum = false);
+    string? EntityId = null, bool IsAlbum = false,
+    SlideNavigationTransitionEffect TransitionEffect = SlideNavigationTransitionEffect.FromBottom);
 
 public sealed partial class ShellPage : Page
 {

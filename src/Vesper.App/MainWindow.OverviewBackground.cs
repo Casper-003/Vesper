@@ -16,7 +16,6 @@ public sealed partial class MainWindow
     {
         overviewBackdropList = songId is not null ? null : key switch
         {
-            "首页" => HomeOverview,
             "曲库" => LibrarySongs,
             "收藏" => FavoriteSongs,
             "创作" => CreationOverview,

@@ -105,14 +105,14 @@ public sealed partial class MainWindow
                 await Navigate("曲库");
                 var neutralBrush = GetOverviewHeroBrush(LibrarySongs);
                 Check(Matches(neutralBrush, neutral)
-                    && new[] { HomeOverview, FavoriteSongs, CreationOverview }.All(list => ReferenceEquals(GetOverviewHeroBrush(list), neutralBrush)),
-                    theme + ": home, library, favorites and Create use one neutral gradient rather than the system accent.");
+                    && new[] { FavoriteSongs, CreationOverview }.All(list => ReferenceEquals(GetOverviewHeroBrush(list), neutralBrush)),
+                    theme + ": library, favorites and Create use one neutral gradient rather than the system accent.");
                 Check(ReferenceEquals(OverviewBackdrop.Background, neutralBrush)
                     && PageArea.Background is SolidColorBrush body && Argb(body.Color) == neutral.Bottom,
                     theme + ": the page body and header gradient meet at the same opaque neutral surface.");
-                Check(Foreground(LibraryTitleBold) == neutral.Foreground && Foreground(HomeTitleBold) == neutral.Foreground
+                Check(Foreground(LibraryTitleBold) == neutral.Foreground
                     && Foreground(FavoriteTitleBold) == neutral.Foreground && Foreground(CreationTitleBold) == neutral.Foreground,
-                    theme + ": every root-page title follows the light/dark readable foreground.");
+                    theme + ": every overview-page title follows the light/dark readable foreground.");
                 var neutralCapture = await Capture();
                 int[] neutralTop = Pixel(neutralCapture, LibraryPage, new Point(8, 20));
                 Check(Difference(neutralTop, Rgb(neutral.Top)) <= 5,

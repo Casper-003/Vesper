@@ -277,7 +277,7 @@ public sealed partial class MainWindow
             int historyCount = ContentFrame.BackStack.Count;
             Check(!NavigateShell(RequestFor("__slide-c")) && ContentFrame.BackStack.Count == historyCount,
                 "Reselecting a cached detail created another history entry.");
-            await Probe("创作", "sidebar-create", NavigationMode.New, null, () => NavigateShell(RequestFor("创作"), fromSidebar: true));
+            await Probe("创作", "sidebar-create", NavigationMode.New, vertical, () => NavigateShell(RequestFor("创作"), fromSidebar: true));
             Check(!ContentFrame.CanGoForward, "A new sidebar route retained stale Forward history.");
             await Probe("__slide-d", "create-to-detail", NavigationMode.New, horizontal, () => NavigateShell(RequestFor("__slide-d")));
             await Probe("创作", "back-detail-to-create", NavigationMode.Back, horizontal, GoShellBack);

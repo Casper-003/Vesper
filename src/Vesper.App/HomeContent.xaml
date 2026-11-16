@@ -3,45 +3,39 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     HorizontalAlignment="Stretch"
-    HorizontalContentAlignment="Stretch">
+    HorizontalContentAlignment="Stretch"
+    VerticalAlignment="Stretch"
+    VerticalContentAlignment="Stretch">
   <UserControl.Resources>
     <ResourceDictionary>
       <ResourceDictionary.ThemeDictionaries>
         <ResourceDictionary x:Key="Dark">
-          <SolidColorBrush x:Key="RackChassisBackground" Color="#1F2227"/>
-          <SolidColorBrush x:Key="RackChassisBorder" Color="#353942"/>
-          <SolidColorBrush x:Key="RackTopHighlight" Color="#14FFFFFF"/>
-          <SolidColorBrush x:Key="RackScrewBrush" Color="#4A4F5C"/>
-          <SolidColorBrush x:Key="RackWellBackground" Color="#15171B"/>
-          <SolidColorBrush x:Key="RackWellBorder" Color="#2C3039"/>
-          <SolidColorBrush x:Key="RackMutedTextBrush" Color="#9AA3B2"/>
-          <SolidColorBrush x:Key="RackBadgeBackground" Color="#2A2E36"/>
-          <SolidColorBrush x:Key="RackBadgeForeground" Color="#D4DBE6"/>
+          <SolidColorBrush x:Key="RackChassisBackground" Color="#1D2025"/>
+          <SolidColorBrush x:Key="RackChassisBorder" Color="#323640"/>
+          <SolidColorBrush x:Key="RackWellBackground" Color="#14161A"/>
+          <SolidColorBrush x:Key="RackWellBorder" Color="#292D36"/>
+          <SolidColorBrush x:Key="RackMutedTextBrush" Color="#8E96A4"/>
+          <SolidColorBrush x:Key="RackBadgeBackground" Color="#262A32"/>
+          <SolidColorBrush x:Key="RackBadgeForeground" Color="#CBD5E1"/>
           <SolidColorBrush x:Key="RackDisabledBackground" Color="#191C21"/>
-          <SolidColorBrush x:Key="RackDisabledBorder" Color="#282C34"/>
-          <SolidColorBrush x:Key="RackDisabledTextBrush" Color="#6F7787"/>
-          <SolidColorBrush x:Key="ModeInactiveBackground" Color="#252830"/>
-          <SolidColorBrush x:Key="ModeInactiveForeground" Color="#B6BFCE"/>
+          <SolidColorBrush x:Key="RackDisabledBorder" Color="#272B33"/>
+          <SolidColorBrush x:Key="RackDisabledTextBrush" Color="#646C7A"/>
         </ResourceDictionary>
         <ResourceDictionary x:Key="Light">
-          <SolidColorBrush x:Key="RackChassisBackground" Color="#EDF0F4"/>
+          <SolidColorBrush x:Key="RackChassisBackground" Color="#EDEFF3"/>
           <SolidColorBrush x:Key="RackChassisBorder" Color="#C7CED9"/>
-          <SolidColorBrush x:Key="RackTopHighlight" Color="#CCFFFFFF"/>
-          <SolidColorBrush x:Key="RackScrewBrush" Color="#9CA5B4"/>
-          <SolidColorBrush x:Key="RackWellBackground" Color="#DCE1E8"/>
+          <SolidColorBrush x:Key="RackWellBackground" Color="#DFE4EB"/>
           <SolidColorBrush x:Key="RackWellBorder" Color="#B6BECA"/>
           <SolidColorBrush x:Key="RackMutedTextBrush" Color="#566070"/>
-          <SolidColorBrush x:Key="RackBadgeBackground" Color="#D8DEE8"/>
+          <SolidColorBrush x:Key="RackBadgeBackground" Color="#D9DFE8"/>
           <SolidColorBrush x:Key="RackBadgeForeground" Color="#2A313D"/>
-          <SolidColorBrush x:Key="RackDisabledBackground" Color="#E2E6EC"/>
-          <SolidColorBrush x:Key="RackDisabledBorder" Color="#C5CCD6"/>
+          <SolidColorBrush x:Key="RackDisabledBackground" Color="#E3E7ED"/>
+          <SolidColorBrush x:Key="RackDisabledBorder" Color="#C6CDD7"/>
           <SolidColorBrush x:Key="RackDisabledTextBrush" Color="#7D8696"/>
-          <SolidColorBrush x:Key="ModeInactiveBackground" Color="#DFE4EC"/>
-          <SolidColorBrush x:Key="ModeInactiveForeground" Color="#3C4554"/>
         </ResourceDictionary>
       </ResourceDictionary.ThemeDictionaries>
 
-      <Style x:Key="RackModuleStyle" TargetType="Border">
+      <Style x:Key="RackPanelStyle" TargetType="Border">
         <Setter Property="CornerRadius" Value="10"/>
         <Setter Property="Background" Value="{ThemeResource RackChassisBackground}"/>
         <Setter Property="BorderBrush" Value="{ThemeResource RackChassisBorder}"/>
@@ -55,9 +49,10 @@
         <Setter Property="BorderThickness" Value="1"/>
       </Style>
 
-      <Style x:Key="DspPlaceholderButtonStyle" TargetType="Button">
+      <Style x:Key="CompactPlaceholderStyle" TargetType="Button">
         <Setter Property="IsEnabled" Value="False"/>
-        <Setter Property="Height" Value="30"/>
+        <Setter Property="Height" Value="28"/>
+        <Setter Property="MinWidth" Value="40"/>
         <Setter Property="Padding" Value="10,0"/>
         <Setter Property="CornerRadius" Value="6"/>
         <Setter Property="FontSize" Value="12"/>
@@ -65,300 +60,206 @@
         <Setter Property="BorderBrush" Value="{ThemeResource RackDisabledBorder}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="Foreground" Value="{ThemeResource RackDisabledTextBrush}"/>
-        <Setter Property="HorizontalAlignment" Value="Stretch"/>
       </Style>
     </ResourceDictionary>
   </UserControl.Resources>
 
-  <Grid x:Name="ConsoleRoot" RowSpacing="16" SizeChanged="OnConsoleSizeChanged">
-    <Grid.RowDefinitions>
-      <RowDefinition Height="Auto"/>
-      <RowDefinition Height="Auto"/>
-    </Grid.RowDefinitions>
+  <Grid x:Name="ConsoleRoot" Padding="18" ColumnSpacing="14" SizeChanged="OnConsoleSizeChanged">
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition x:Name="LeftColumnDef" Width="190"/>
+      <ColumnDefinition Width="*"/>
+      <ColumnDefinition x:Name="RightColumnDef" Width="256"/>
+    </Grid.ColumnDefinitions>
 
-    <!-- 上方：数字功放状态显示屏 -->
-    <Border Style="{StaticResource RackModuleStyle}" Padding="16,14">
-      <Grid RowSpacing="12">
+    <!-- 左侧竖向长条：全部音频推子 + 实时电平灯柱 + 耳返开关 -->
+    <Border Grid.Column="0" Style="{StaticResource RackPanelStyle}" Padding="12">
+      <Grid RowSpacing="10">
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto"/>
-          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <!-- 机架丝印标识条与螺丝装饰 -->
-        <Grid ColumnSpacing="8">
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="Auto"/>
-            <ColumnDefinition Width="*"/>
-            <ColumnDefinition Width="Auto"/>
-          </Grid.ColumnDefinitions>
-          <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-            <Ellipse Width="7" Height="7" Fill="{ThemeResource RackScrewBrush}" VerticalAlignment="Center"/>
-            <TextBlock Text="VESPER KTV // DIGITAL MIXER CONSOLE" FontSize="11" FontWeight="SemiBold" CharacterSpacing="90" Foreground="{ThemeResource RackMutedTextBrush}" VerticalAlignment="Center"/>
+        <Button x:Name="MonitoringToggleButton" Height="36" HorizontalAlignment="Stretch" Padding="10,0" CornerRadius="7" BorderThickness="1" Click="OnMonitoringToggleClicked" ToolTipService.ToolTip="开启/关闭实时人声返听；使用音箱时请从低音量开始">
+          <StackPanel Orientation="Horizontal" Spacing="7" HorizontalAlignment="Center">
+            <Ellipse x:Name="MonitoringButtonLed" Width="8" Height="8" Fill="#EF4444" VerticalAlignment="Center"/>
+            <FontIcon Glyph="&#xE720;" FontSize="13" VerticalAlignment="Center"/>
+            <TextBlock x:Name="MonitoringToggleLabel" Text="耳返" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"/>
           </StackPanel>
-          <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-            <Border Background="{ThemeResource RackBadgeBackground}" CornerRadius="4" Padding="7,2">
-              <TextBlock Text="24-BIT WASAPI" FontSize="10" FontWeight="SemiBold" CharacterSpacing="50" Foreground="{ThemeResource RackBadgeForeground}"/>
-            </Border>
-            <Ellipse Width="7" Height="7" Fill="{ThemeResource RackScrewBrush}" VerticalAlignment="Center"/>
-          </StackPanel>
-        </Grid>
+        </Button>
 
-        <!-- 烟熏黑 OLED 数字显示屏 -->
-        <Border Grid.Row="1" CornerRadius="8" Background="#101318" BorderBrush="#262C36" BorderThickness="1" Padding="18,14">
-          <Grid x:Name="DisplayScreenGrid" ColumnSpacing="18" RowSpacing="14">
+        <Border x:Name="LeftFaderWell" Grid.Row="1" Style="{StaticResource RackWellStyle}" Padding="8,12" SizeChanged="OnLeftWellSizeChanged">
+          <Grid x:Name="LeftFaderGrid" ColumnSpacing="2" RowSpacing="8">
             <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="1.2*"/>
+              <ColumnDefinition Width="*"/>
               <ColumnDefinition Width="Auto"/>
-              <ColumnDefinition Width="1.2*"/>
-              <ColumnDefinition Width="Auto"/>
-              <ColumnDefinition Width="Auto"/>
+              <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
             <Grid.RowDefinitions>
-              <RowDefinition Height="Auto"/>
+              <RowDefinition Height="*"/>
               <RowDefinition Height="Auto"/>
               <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
-
-            <!-- 系统指示灯与实时状态 -->
-            <StackPanel x:Name="DisplayStatusCell" Grid.Row="0" Grid.Column="0" Spacing="5" VerticalAlignment="Center">
-              <StackPanel Orientation="Horizontal" Spacing="8">
-                <Ellipse x:Name="StatusLed" Width="10" Height="10" Fill="#EF4444" VerticalAlignment="Center"/>
-                <TextBlock x:Name="DisplayStatusCode" Text="STANDBY" FontSize="12" FontWeight="Bold" FontFamily="Consolas" CharacterSpacing="60" Foreground="#F8FAFC" VerticalAlignment="Center"/>
-                <Border x:Name="DisplayModeBadge" Background="#1F2937" BorderBrush="#374151" BorderThickness="1" CornerRadius="4" Padding="6,1">
-                  <TextBlock x:Name="DisplayModeLabel" Text="共享低延迟" FontSize="11" Foreground="#39C5BB"/>
-                </Border>
-              </StackPanel>
-              <TextBlock x:Name="DisplayStatusDetail" Text="等待初始化音频设备…" FontSize="12" Foreground="#94A3B8" TextTrimming="CharacterEllipsis"/>
-              <TextBlock x:Name="DisplayPeriodText" Text="ENGINE: READY" FontSize="11" FontFamily="Consolas" Foreground="#64748B" TextTrimming="CharacterEllipsis"/>
-            </StackPanel>
-
-            <Border x:Name="DisplayDivider1" Grid.Row="0" Grid.Column="1" Width="1" Background="#232934" Margin="0,2"/>
-
-            <!-- 输入/输出硬件路由读数 -->
-            <StackPanel x:Name="DisplayRoutingCell" Grid.Row="0" Grid.Column="2" Spacing="5" VerticalAlignment="Center">
-              <Grid ColumnSpacing="8">
-                <Grid.ColumnDefinitions><ColumnDefinition Width="56"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                <TextBlock Text="MIC IN" FontSize="11" FontFamily="Consolas" Foreground="#64748B" VerticalAlignment="Center"/>
-                <TextBlock x:Name="DisplayInputName" Grid.Column="1" Text="未选择麦克风" FontSize="12" FontWeight="SemiBold" Foreground="#E2E8F0" TextTrimming="CharacterEllipsis"/>
-              </Grid>
-              <Grid ColumnSpacing="8">
-                <Grid.ColumnDefinitions><ColumnDefinition Width="56"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                <TextBlock Text="VOX OUT" FontSize="11" FontFamily="Consolas" Foreground="#64748B" VerticalAlignment="Center"/>
-                <TextBlock x:Name="DisplayOutputName" Grid.Column="1" Text="未选择输出设备" FontSize="12" FontWeight="SemiBold" Foreground="#E2E8F0" TextTrimming="CharacterEllipsis"/>
-              </Grid>
-              <Grid ColumnSpacing="8">
-                <Grid.ColumnDefinitions><ColumnDefinition Width="56"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                <TextBlock Text="STAGE" FontSize="11" FontFamily="Consolas" Foreground="#64748B" VerticalAlignment="Center"/>
-                <TextBlock x:Name="DisplayStageSummary" Grid.Column="1" Text="待播 0 首" FontSize="12" Foreground="#94A3B8" TextTrimming="CharacterEllipsis"/>
-              </Grid>
-            </StackPanel>
-
-            <Border x:Name="DisplayDivider2" Grid.Row="0" Grid.Column="3" Width="1" Background="#232934" Margin="0,2"/>
-
-            <!-- 快捷开唱入口 -->
-            <StackPanel x:Name="DisplayActionCell" Grid.Row="0" Grid.Column="4" VerticalAlignment="Center" HorizontalAlignment="Right" Spacing="6">
-              <Button x:Name="QuickSingButton" Click="OnQuickSingClicked" Height="38" Padding="18,0" CornerRadius="8" Background="#39C5BB" Foreground="#0B1414" FontWeight="SemiBold" BorderThickness="0">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                  <FontIcon x:Name="QuickSingGlyph" Glyph="&#xE768;" FontSize="14"/>
-                  <TextBlock x:Name="QuickSingLabel" Text="开始演唱" VerticalAlignment="Center"/>
-                </StackPanel>
-              </Button>
-              <TextBlock x:Name="DisplayQueueHint" Text="队列待命" FontSize="11" Foreground="#64748B" HorizontalAlignment="Center"/>
-            </StackPanel>
+            <Grid x:Name="VocalVolumeHost" Grid.Row="0" Grid.Column="0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            <Grid x:Name="MicMeterHost" Grid.Row="0" Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            <Grid x:Name="BgmVolumeHost" Grid.Row="0" Grid.Column="2" HorizontalAlignment="Center" VerticalAlignment="Center"/>
           </Grid>
         </Border>
       </Grid>
     </Border>
 
-    <!-- 下方：左区 MIC / 人声通道 ＋ 右区 BGM / 伴奏与主控通道 -->
-    <Grid x:Name="ChannelsGrid" Grid.Row="1" ColumnSpacing="16" RowSpacing="16">
-      <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="*"/>
-        <ColumnDefinition Width="*"/>
-      </Grid.ColumnDefinitions>
+    <!-- 中间区：上方演唱界面大屏幕 + 下方参数长条 -->
+    <Grid Grid.Column="1" RowSpacing="14">
       <Grid.RowDefinitions>
-        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="*"/>
         <RowDefinition Height="Auto"/>
       </Grid.RowDefinitions>
 
-      <!-- 下方左区：CH 01 · MIC / 人声通道 -->
-      <Border x:Name="MicChannelCard" Grid.Row="0" Grid.Column="0" Style="{StaticResource RackModuleStyle}" Padding="18,16">
-        <Grid RowSpacing="14">
+      <!-- 中上：演唱界面大屏幕（四周留白，不沾满中间区域） -->
+      <Grid x:Name="CenterStageHost" Grid.Row="0" SizeChanged="OnCenterStageSizeChanged">
+        <!-- 专辑取色环境柔光层 -->
+        <Border x:Name="StageAmbientGlow" CornerRadius="28" Opacity="0" IsHitTestVisible="False" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+
+        <!-- 大屏幕主体 -->
+        <Border x:Name="StageScreenBorder" CornerRadius="12" BorderThickness="1.5" HorizontalAlignment="Center" VerticalAlignment="Center" Background="#14161B" BorderBrush="#2C3038" PointerEntered="OnStagePointerEntered" PointerExited="OnStagePointerExited">
+          <Grid x:Name="StageScreenClip">
+            <!-- 专辑取色柔光内衬 -->
+            <Grid x:Name="StageColorWash" IsHitTestVisible="False" Opacity="0"/>
+
+            <!-- 无歌曲时灰色软件 Logo 占位 -->
+            <StackPanel x:Name="StageLogoPlaceholder" Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False">
+              <Border Width="64" Height="64" CornerRadius="18" Background="#1D2027" BorderBrush="#2C313C" BorderThickness="1.5" HorizontalAlignment="Center">
+                <FontIcon Glyph="&#xE8D6;" FontSize="28" Foreground="#5E6675" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              </Border>
+              <TextBlock Text="VESPER" FontSize="13" FontWeight="Bold" FontFamily="Consolas" CharacterSpacing="220" Foreground="#5A6270" HorizontalAlignment="Center"/>
+            </StackPanel>
+
+            <!-- 有歌曲时 MV 首帧或封面 -->
+            <Image x:Name="StagePreviewImage" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" IsHitTestVisible="False"/>
+
+            <!-- 底部固定高度极简单行曲名（用透明度切换，不引发任何控件移位） -->
+            <Border x:Name="StageCaptionBar" Height="40" VerticalAlignment="Bottom" Padding="14,0" Opacity="0" IsHitTestVisible="False">
+              <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                  <GradientStop Color="#00000000" Offset="0"/>
+                  <GradientStop Color="#CC000000" Offset="1"/>
+                </LinearGradientBrush>
+              </Border.Background>
+              <TextBlock x:Name="StageCaptionText" FontSize="13" FontWeight="SemiBold" Foreground="#F1F5F9" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
+            </Border>
+
+            <!-- 光标移入时出现的全屏演唱按钮 -->
+            <Button x:Name="StageEnterButton" Width="62" Height="62" Padding="0" CornerRadius="31" BorderThickness="0" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0" IsHitTestVisible="False" Click="OnStageEnterClicked" GotFocus="OnStageButtonFocusChanged" LostFocus="OnStageButtonFocusChanged" ToolTipService.ToolTip="进入全屏演唱" AutomationProperties.Name="进入全屏演唱">
+              <Grid>
+                <FontIcon x:Name="StagePlayGlyph" Glyph="&#xE768;" FontSize="24" Foreground="White"/>
+                <ProgressRing x:Name="StageLoadingRing" Width="26" Height="26" IsActive="False" Visibility="Collapsed" Foreground="White"/>
+              </Grid>
+            </Button>
+          </Grid>
+        </Border>
+      </Grid>
+
+      <!-- 中下横向长条：极简硬件参数（固定槽位高度与宽度，零位移） -->
+      <Border x:Name="BottomParameterBar" Grid.Row="1" Style="{StaticResource RackPanelStyle}" Padding="14,10">
+        <Grid RowSpacing="8">
           <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="34"/>
+            <RowDefinition Height="30"/>
           </Grid.RowDefinitions>
 
-          <!-- 通道头：CH 01 + 刷新 + 耳返开关 -->
-          <Grid ColumnSpacing="8">
+          <!-- 第一行：设备输入／输出、刷新、模式切换 -->
+          <Grid x:Name="ParamIoGrid" Grid.Row="0" ColumnSpacing="8">
             <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto"/>
               <ColumnDefinition Width="*"/>
               <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-              <Border Background="{ThemeResource RackBadgeBackground}" CornerRadius="5" Padding="8,3">
-                <TextBlock Text="CH 01" FontSize="11" FontWeight="Bold" FontFamily="Consolas" Foreground="{ThemeResource RackBadgeForeground}"/>
-              </Border>
-              <StackPanel Spacing="1">
-                <TextBlock Text="MIC / 人声通道" FontSize="16" FontWeight="SemiBold"/>
-                <TextBlock Text="即时干声返听与实时试麦电平" FontSize="12" Foreground="{ThemeResource RackMutedTextBrush}"/>
-              </StackPanel>
-            </StackPanel>
-            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-              <Button x:Name="RefreshDevicesButton" Width="34" Height="34" Padding="0" CornerRadius="6" Click="OnRefreshDevicesClicked" ToolTipService.ToolTip="刷新音频设备" AutomationProperties.Name="刷新音频设备">
-                <FontIcon Glyph="&#xE72C;" FontSize="14"/>
-              </Button>
-              <Button x:Name="MonitoringToggleButton" Height="34" Padding="12,0" CornerRadius="6" Click="OnMonitoringToggleClicked" BorderThickness="1">
-                <StackPanel Orientation="Horizontal" Spacing="7">
-                  <Ellipse x:Name="MonitoringButtonLed" Width="8" Height="8" Fill="#EF4444" VerticalAlignment="Center"/>
-                  <TextBlock x:Name="MonitoringToggleLabel" Text="开启实时返听" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                </StackPanel>
-              </Button>
-            </StackPanel>
-          </Grid>
-
-          <!-- 输入输出设备选择 -->
-          <Grid x:Name="DeviceSelectorsGrid" Grid.Row="1" ColumnSpacing="12" RowSpacing="10">
-            <Grid.ColumnDefinitions>
               <ColumnDefinition Width="*"/>
-              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+              <ColumnDefinition Width="108"/>
             </Grid.ColumnDefinitions>
-            <Grid.RowDefinitions>
-              <RowDefinition Height="Auto"/>
-              <RowDefinition Height="Auto"/>
-            </Grid.RowDefinitions>
-            <ComboBox x:Name="InputDeviceBox" Header="麦克风输入" HorizontalAlignment="Stretch" SelectionChanged="OnInputDeviceChanged"/>
-            <ComboBox x:Name="OutputDeviceBox" Grid.Column="1" Header="人声输出（耳机／音箱）" HorizontalAlignment="Stretch" SelectionChanged="OnOutputDeviceChanged"/>
-          </Grid>
 
-          <!-- 音量控制与实时电平灯柱 -->
-          <Border Grid.Row="2" Style="{StaticResource RackWellStyle}" Padding="14,12">
-            <Grid ColumnSpacing="14">
+            <FontIcon Grid.Column="0" Glyph="&#xE720;" FontSize="14" Foreground="{ThemeResource RackMutedTextBrush}" VerticalAlignment="Center" ToolTipService.ToolTip="麦克风输入"/>
+            <ComboBox x:Name="InputDeviceBox" Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Center" PlaceholderText="麦克风" SelectionChanged="OnInputDeviceChanged" ToolTipService.ToolTip="麦克风输入设备"/>
+
+            <FontIcon Grid.Column="2" Glyph="&#xE7F5;" FontSize="14" Foreground="{ThemeResource RackMutedTextBrush}" VerticalAlignment="Center" Margin="4,0,0,0" ToolTipService.ToolTip="人声输出设备"/>
+            <ComboBox x:Name="OutputDeviceBox" Grid.Column="3" HorizontalAlignment="Stretch" VerticalAlignment="Center" PlaceholderText="输出" SelectionChanged="OnOutputDeviceChanged" ToolTipService.ToolTip="人声输出设备（耳机／音箱）"/>
+
+            <Button x:Name="RefreshDevicesButton" Grid.Column="4" Width="32" Height="32" Padding="0" CornerRadius="6" Click="OnRefreshDevicesClicked" ToolTipService.ToolTip="刷新设备" AutomationProperties.Name="刷新设备">
+              <FontIcon Glyph="&#xE72C;" FontSize="13"/>
+            </Button>
+
+            <Grid Grid.Column="5" ColumnSpacing="4" VerticalAlignment="Center">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="*"/>
               </Grid.ColumnDefinitions>
-              <Grid x:Name="VocalVolumeHost" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-              <Grid x:Name="MicMeterHost" Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              <Button x:Name="LowLatencyModeButton" Content="共享" Height="32" Padding="0" CornerRadius="6" FontSize="12" HorizontalAlignment="Stretch" Click="OnLowLatencyModeClicked" ToolTipService.ToolTip="共享低延迟：可同时播放伴奏"/>
+              <Button x:Name="ExclusiveModeButton" Grid.Column="1" Content="独占" Height="32" Padding="0" CornerRadius="6" FontSize="12" HorizontalAlignment="Stretch" Click="OnExclusiveModeClicked" ToolTipService.ToolTip="独占模式：独占硬件干声返听，与伴奏互斥"/>
             </Grid>
-          </Border>
+          </Grid>
 
-          <!-- 通道状态与防啸叫提示 -->
-          <StackPanel Grid.Row="3" Spacing="4">
-            <TextBlock x:Name="MonitoringStatusText" Text="返听已关闭" FontSize="12" TextWrapping="Wrap"/>
-            <TextBlock Text="使用音箱时请从较低音量开始，避免麦克风与音箱形成啸叫。" FontSize="11" Foreground="{ThemeResource RackMutedTextBrush}" TextWrapping="Wrap"/>
-          </StackPanel>
-        </Grid>
-      </Border>
-
-      <!-- 下方右区：CH 02 · BGM / 伴奏与主控通道 -->
-      <Border x:Name="BgmChannelCard" Grid.Row="0" Grid.Column="1" Style="{StaticResource RackModuleStyle}" Padding="18,16">
-        <Grid RowSpacing="14">
-          <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-          </Grid.RowDefinitions>
-
-          <!-- 通道头：CH 02 -->
-          <Grid ColumnSpacing="8">
+          <!-- 第二行：未开放参数占位 + 固定尺寸精简状态槽 -->
+          <Grid Grid.Row="1" ColumnSpacing="10">
             <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="*"/>
               <ColumnDefinition Width="Auto"/>
+              <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
-            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-              <Border Background="{ThemeResource RackBadgeBackground}" CornerRadius="5" Padding="8,3">
-                <TextBlock Text="CH 02" FontSize="11" FontWeight="Bold" FontFamily="Consolas" Foreground="{ThemeResource RackBadgeForeground}"/>
-              </Border>
-              <StackPanel Spacing="1">
-                <TextBlock Text="BGM / 伴奏与主控通道" FontSize="16" FontWeight="SemiBold"/>
-                <TextBlock Text="伴奏电平、引擎模式与 KTV 效果器" FontSize="12" Foreground="{ThemeResource RackMutedTextBrush}"/>
-              </StackPanel>
+
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+              <Button Content="原/伴" Style="{StaticResource CompactPlaceholderStyle}" ToolTipService.ToolTip="原／伴唱切换（尚未开放）"/>
+              <Button Content="♭" Style="{StaticResource CompactPlaceholderStyle}" MinWidth="32" Padding="0" ToolTipService.ToolTip="降调（尚未开放）"/>
+              <Button Content="♮" Style="{StaticResource CompactPlaceholderStyle}" MinWidth="32" Padding="0" ToolTipService.ToolTip="原调（尚未开放）"/>
+              <Button Content="♯" Style="{StaticResource CompactPlaceholderStyle}" MinWidth="32" Padding="0" ToolTipService.ToolTip="升调（尚未开放）"/>
+              <Button Content="混响" Style="{StaticResource CompactPlaceholderStyle}" ToolTipService.ToolTip="混响效果（尚未开放）"/>
             </StackPanel>
-            <Border Grid.Column="1" Background="{ThemeResource RackBadgeBackground}" CornerRadius="5" Padding="8,3" VerticalAlignment="Center">
-              <TextBlock Text="MASTER" FontSize="11" FontWeight="SemiBold" FontFamily="Consolas" Foreground="{ThemeResource RackBadgeForeground}"/>
+
+            <!-- 固定槽位状态读数：产生或消失绝不挤压左侧控件 -->
+            <Border Grid.Column="1" Height="28" CornerRadius="6" Background="{ThemeResource RackWellBackground}" BorderBrush="{ThemeResource RackWellBorder}" BorderThickness="1" Padding="10,0" VerticalAlignment="Center">
+              <Grid ColumnSpacing="7">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Ellipse x:Name="ParamStatusLed" Width="7" Height="7" Fill="#EF4444" VerticalAlignment="Center"/>
+                <TextBlock x:Name="ParamStatusText" Grid.Column="1" FontSize="11" FontFamily="Consolas" Foreground="{ThemeResource RackMutedTextBrush}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
+              </Grid>
             </Border>
           </Grid>
-
-          <!-- 音频模式切换 -->
-          <StackPanel Grid.Row="1" Spacing="8">
-            <TextBlock Text="音频模式" FontSize="13"/>
-            <Grid ColumnSpacing="8">
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="*"/>
-              </Grid.ColumnDefinitions>
-              <Button x:Name="LowLatencyModeButton" Content="共享低延迟" HorizontalAlignment="Stretch" Height="34" CornerRadius="6" Click="OnLowLatencyModeClicked"/>
-              <Button x:Name="ExclusiveModeButton" Grid.Column="1" Content="独占模式" HorizontalAlignment="Stretch" Height="34" CornerRadius="6" Click="OnExclusiveModeClicked"/>
-            </Grid>
-          </StackPanel>
-
-          <!-- 伴奏音量控制与未开放 KTV 效果器占位 -->
-          <Border Grid.Row="2" Style="{StaticResource RackWellStyle}" Padding="14,12">
-            <Grid x:Name="BgmWellGrid" ColumnSpacing="14" RowSpacing="14">
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="*"/>
-              </Grid.ColumnDefinitions>
-              <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-              </Grid.RowDefinitions>
-              <Grid x:Name="BgmVolumeHost" MinWidth="104" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-
-              <!-- KTV 进阶硬件占位区 -->
-              <StackPanel x:Name="DspRackPanel" Grid.Column="1" Spacing="10" VerticalAlignment="Center">
-                <Grid>
-                  <TextBlock Text="KTV 效果器（硬件机架占位）" FontSize="11" FontWeight="SemiBold" Foreground="{ThemeResource RackMutedTextBrush}" VerticalAlignment="Center"/>
-                  <Border HorizontalAlignment="Right" Background="{ThemeResource RackDisabledBackground}" BorderBrush="{ThemeResource RackDisabledBorder}" BorderThickness="1" CornerRadius="4" Padding="6,1">
-                    <TextBlock Text="尚未开放" FontSize="10" Foreground="{ThemeResource RackDisabledTextBrush}"/>
-                  </Border>
-                </Grid>
-
-                <StackPanel Spacing="4">
-                  <TextBlock Text="原／伴唱切换 · VOCAL CUT" FontSize="11" Foreground="{ThemeResource RackDisabledTextBrush}"/>
-                  <Grid ColumnSpacing="6">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                    <Button Content="原唱" Style="{StaticResource DspPlaceholderButtonStyle}"/>
-                    <Button Grid.Column="1" Content="伴奏" Style="{StaticResource DspPlaceholderButtonStyle}"/>
-                  </Grid>
-                </StackPanel>
-
-                <StackPanel Spacing="4">
-                  <TextBlock Text="升降调 · KEY SHIFT" FontSize="11" Foreground="{ThemeResource RackDisabledTextBrush}"/>
-                  <Grid ColumnSpacing="6">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                    <Button Content="♭ 降调" Style="{StaticResource DspPlaceholderButtonStyle}"/>
-                    <Button Grid.Column="1" Content="♮ 原调" Style="{StaticResource DspPlaceholderButtonStyle}"/>
-                    <Button Grid.Column="2" Content="♯ 升调" Style="{StaticResource DspPlaceholderButtonStyle}"/>
-                  </Grid>
-                </StackPanel>
-
-                <StackPanel Spacing="4">
-                  <Grid>
-                    <TextBlock Text="混响预设 · REVERB DSP" FontSize="11" Foreground="{ThemeResource RackDisabledTextBrush}"/>
-                    <TextBlock Text="0%" HorizontalAlignment="Right" FontSize="11" FontFamily="Consolas" Foreground="{ThemeResource RackDisabledTextBrush}"/>
-                  </Grid>
-                  <Grid ColumnSpacing="6">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                    <Button Content="干声" Style="{StaticResource DspPlaceholderButtonStyle}"/>
-                    <Button Grid.Column="1" Content="KTV" Style="{StaticResource DspPlaceholderButtonStyle}"/>
-                    <Button Grid.Column="2" Content="音乐厅" Style="{StaticResource DspPlaceholderButtonStyle}"/>
-                  </Grid>
-                </StackPanel>
-              </StackPanel>
-            </Grid>
-          </Border>
-
-          <!-- 模式说明 -->
-          <Border Grid.Row="3" Background="{ThemeResource RackWellBackground}" BorderBrush="{ThemeResource RackWellBorder}" BorderThickness="1" CornerRadius="6" Padding="10,8">
-            <TextBlock x:Name="ModeUsageText" FontSize="12" Foreground="{ThemeResource RackMutedTextBrush}" TextWrapping="Wrap"/>
-          </Border>
         </Grid>
       </Border>
     </Grid>
+
+    <!-- 右侧竖向长条：首页内嵌待播列表 -->
+    <Border Grid.Column="2" Style="{StaticResource RackPanelStyle}" Padding="12,12,0,12">
+      <Grid RowSpacing="10">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" Margin="0,0,12,0" Height="28">
+          <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+            <FontIcon Glyph="&#xE90B;" FontSize="14" Foreground="{ThemeResource RackMutedTextBrush}"/>
+            <TextBlock Text="待播" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
+          </StackPanel>
+          <TextBlock x:Name="HomeQueueCount" Text="0" MinWidth="24" TextAlignment="Right" FontSize="12" FontFamily="Consolas" Foreground="{ThemeResource RackMutedTextBrush}" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+        </Grid>
+
+        <StackPanel x:Name="HomeQueueCurrentArea" Grid.Row="1" Margin="0,0,12,0" Visibility="Collapsed" Spacing="4">
+          <TextBlock x:Name="HomeQueueCurrentState" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+          <ContentControl x:Name="HomeQueueCurrentContent" HorizontalContentAlignment="Stretch"/>
+        </StackPanel>
+
+        <Grid Grid.Row="2">
+          <ListView x:Name="HomeQueueSongs" Padding="0,0,12,0" SelectionMode="None" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollMode="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListView.ItemContainerTransitions><TransitionCollection/></ListView.ItemContainerTransitions>
+          </ListView>
+          <StackPanel x:Name="HomeQueueEmpty" Margin="12,12,24,12" Spacing="8" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False">
+            <FontIcon Glyph="&#xE8EF;" FontSize="28" HorizontalAlignment="Center" Foreground="{ThemeResource RackMutedTextBrush}"/>
+            <TextBlock x:Name="HomeQueueEmptyTitle" Text="暂无待播" FontSize="13" Foreground="{ThemeResource RackMutedTextBrush}" HorizontalAlignment="Center"/>
+          </StackPanel>
+        </Grid>
+      </Grid>
+    </Border>
   </Grid>
 </UserControl>

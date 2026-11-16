@@ -25,7 +25,9 @@ public sealed partial class MainWindow
     private CompositionRoundedRectangleGeometry? singingPreviewClipGeometry;
     private string? singingPreviewFramePath;
     private BitmapImage? singingPreviewFrame;
+    private uint? singingPreviewFrameColor;
     private CancellationTokenSource? singingPreviewCancellation;
+    private string? stageCoverLoadingId;
 
     private void InitializeSinging(ShellPreferences preferences)
     {
@@ -62,8 +64,12 @@ public sealed partial class MainWindow
         RefreshSinging();
     }
 
+    private Brush? defaultSingingPreviewBackground;
+
     private void ConfigureSingingStageButton()
     {
+        defaultSingingPreviewBackground = SingingPreviewStage.Background;
+        SingingPreviewColorWash.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(240) };
         foreach (Button button in new[] { SingingStagePlayButton, SingingCollapseButton })
         {
             button.Background = SingingView.CreateGlassMaterial();
@@ -112,6 +118,12 @@ public sealed partial class MainWindow
     {
         Size currentHost = referenceHostSize ?? new Size(Math.Max(1, Root.ActualWidth), Math.Max(1, Root.ActualHeight));
         Size host = targetHostSize ?? new Size(Math.Max(1, Root.ActualWidth), Math.Max(1, Root.ActualHeight));
+        if ((ContentFrame.Content as ShellPage)?.PageKey == "首页" && HomeSections.GetStageScreenBounds(Root) is { } stageBounds)
+        {
+            double rightMargin = Math.Max(0, currentHost.Width - stageBounds.Right);
+            double x = Math.Max(0, host.Width - rightMargin - stageBounds.Width);
+            return new Rect(x, stageBounds.Y, stageBounds.Width, stageBounds.Height);
+        }
         FrameworkElement anchor = singingPanelOpen && SingingPreviewStage.ActualWidth > 8 && SingingPreviewStage.ActualHeight > 8
             ? SingingPreviewStage
             : SingingShell.ActualWidth > 8 && SingingShell.ActualHeight > 8 ? SingingShell : QueueSidebarSlot;
@@ -173,7 +185,7 @@ public sealed partial class MainWindow
         bool expanding = singingEntryRequested && !singingVisible;
         if (singingEntryRequested) ShowSinging();
         singingEntryRequested = false;
-        if (!singingVisible) return; // Automatic next while browsing keeps that page.
+        if (!singingVisible) return;
         int request = singingPresentationRevision;
         Size hostSize = new(Math.Max(1, Root.ActualWidth), Math.Max(1, Root.ActualHeight));
         Rect origin = GetSingingEntryBounds(hostSize, singingEntryHostSize);
@@ -225,12 +237,12 @@ public sealed partial class MainWindow
             {
                 singingView.ResetTransition();
                 singingView.Visibility = Visibility.Collapsed;
-                if (singingPanelOpen) SingingStagePlayButton.Focus(FocusState.Programmatic);
+                if ((ContentFrame.Content as ShellPage)?.PageKey == "首页") HomeSections.Focus(FocusState.Programmatic);
+                else if (singingPanelOpen) SingingStagePlayButton.Focus(FocusState.Programmatic);
                 else SingingOpenButton.Focus(FocusState.Programmatic);
                 DispatcherQueue.TryEnqueue(UpdateTitleLayout);
             }
         }
-        // Keep the same player and video surface attached: no pause, prepare or seek.
     }
 
     private async void OnSkipSinging()
@@ -252,7 +264,6 @@ public sealed partial class MainWindow
                     Title = "退出本场？", Content = "将停止当前歌曲，下次从头播放；待播队列保留。",
                     PrimaryButtonText = "退出本场", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close
                 };
-                // Confirmation does not pause or mute the current performance.
                 if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
             }
             singing.Exit(); ReturnToBrowsing();
@@ -273,6 +284,9 @@ public sealed partial class MainWindow
         var entry = viewModel.Queue.Current;
         var nextEntry = entry ?? viewModel.Queue.Pending.FirstOrDefault();
         var previewSong = nextEntry is null ? null : viewModel.FindSong(nextEntry.SongId);
+        bool hasSong = nextEntry is not null;
+        string caption = singing.Message.Length > 0 ? singing.Message : previewSong?.Title ?? nextEntry?.Title ?? "";
+
         SingingStagePlayGlyph.Visibility = singing.Loading ? Visibility.Collapsed : Visibility.Visible;
         SingingStageLoadingRing.IsActive = singing.Loading;
         SingingStageLoadingRing.Visibility = singing.Loading ? Visibility.Visible : Visibility.Collapsed;
@@ -280,47 +294,135 @@ public sealed partial class MainWindow
         string playLabel = entry is not null ? "返回演唱" : "开始演唱";
         ToolTipService.SetToolTip(SingingStagePlayButton, playLabel);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(SingingStagePlayButton, playLabel);
-
-        string caption = singing.Message.Length > 0 ? singing.Message : previewSong?.Title ?? nextEntry?.Title ?? "";
         SingingPreviewCaption.Text = caption;
         SingingPreviewCaptionBar.Visibility = caption.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
-        UpdateSingingCardArtwork(entry, previewSong);
+
+        UpdateStageArtwork(entry, previewSong, hasSong, caption);
 
         singingView.UpdateState(entry is not null, singing.Loading, singing.Ready,
             viewModel.Queue.State == PlaybackState.Paused, viewModel.Queue.Pending.Count, singing.Message, SeekDuringSingingSwitch.IsOn);
         singingView.UpdateTime(singing.Playback.Position, singing.Playback.Duration);
         if (!singing.Loading && !singing.Ready && singing.Message.Length > 0) singingEntryRequested = false;
-        RefreshHomeConsoleQueue();
     }
 
-    private void UpdateSingingCardArtwork(QueueEntry? currentEntry, LibrarySongItem? previewSong)
+    private void UpdateStageArtwork(QueueEntry? currentEntry, LibrarySongItem? previewSong, bool hasSong, string caption)
     {
-        if (currentEntry is not null && singing.FirstFrame is not null)
-        {
-            SetSingingPreviewSource(singing.FirstFrame);
-            return;
-        }
-        string? videoPath = previewSong is null ? null : SingingSession.FindVideoPath(previewSong.Song);
-        if (videoPath is not null && string.Equals(singingPreviewFramePath, videoPath, StringComparison.Ordinal) && singingPreviewFrame is not null)
-        {
-            SetSingingPreviewSource(singingPreviewFrame);
-            return;
-        }
-        SetSingingPreviewSource(previewSong?.Cover as ImageSource);
-        if (videoPath is null)
+        if (!hasSong)
         {
             singingPreviewCancellation?.Cancel();
             singingPreviewCancellation = null;
+            SetSingingPreviewSource(null, hasSong: false);
+            ApplySingingPreviewStageColor(null, hasSong: false);
+            HomeSections.SetStagePresentation(null, false, "", null, hasSong: false, singing.Loading, false);
             return;
         }
-        _ = LoadSingingPreviewFrameAsync(videoPath);
+
+        if (previewSong is not null && previewSong.Cover is null && stageCoverLoadingId != previewSong.Song.Id)
+            _ = EnsureStageSongCoverAsync(previewSong);
+
+        ImageSource? displayImage = null;
+        bool isVideo = false;
+        string? videoPath = previewSong is null ? null : SingingSession.FindVideoPath(previewSong.Song);
+
+        if (currentEntry is not null && singing.FirstFrame is not null)
+        {
+            displayImage = singing.FirstFrame;
+            isVideo = true;
+        }
+        else if (videoPath is not null && string.Equals(singingPreviewFramePath, videoPath, StringComparison.Ordinal) && singingPreviewFrame is not null)
+        {
+            displayImage = singingPreviewFrame;
+            isVideo = true;
+        }
+        else
+        {
+            // 无 MV 视频帧时不直接贴静态专辑封面图，改由专辑取色版呈现纯色舞台背景。
+            displayImage = null;
+            isVideo = false;
+            if (videoPath is null)
+            {
+                singingPreviewCancellation?.Cancel();
+                singingPreviewCancellation = null;
+            }
+            else
+            {
+                _ = LoadSingingPreviewFrameAsync(videoPath);
+            }
+        }
+
+        uint? swatchColor = null;
+        if (previewSong?.Cover is BitmapImage coverBitmap && artworkSwatches.TryGetValue(coverBitmap, out var coverSwatch))
+            swatchColor = coverSwatch.Color;
+        else if (previewSong is not null && previewSong.CoverColor != 0xFF48545C)
+            swatchColor = previewSong.CoverColor;
+        else if (videoPath is not null && string.Equals(singingPreviewFramePath, videoPath, StringComparison.Ordinal) && singingPreviewFrameColor is { } frameColor)
+            swatchColor = frameColor;
+        else if (previewSong is not null)
+            swatchColor = previewSong.CoverColor;
+
+        SetSingingPreviewSource(displayImage, hasSong: true);
+        ApplySingingPreviewStageColor(swatchColor, hasSong: true);
+        HomeSections.SetStagePresentation(displayImage, isVideo, caption, swatchColor, hasSong: true, singing.Loading, currentEntry is not null);
     }
 
-    private void SetSingingPreviewSource(ImageSource? source)
+    private void SetSingingPreviewSource(ImageSource? source, bool hasSong)
     {
         SingingPreviewImage.Source = source;
         SingingPreviewImage.Visibility = source is null ? Visibility.Collapsed : Visibility.Visible;
-        SingingPreviewPlaceholder.Visibility = source is null ? Visibility.Visible : Visibility.Collapsed;
+        SingingPreviewPlaceholder.Visibility = !hasSong && source is null ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void ApplySingingPreviewStageColor(uint? swatchColor, bool hasSong)
+    {
+        if (!hasSong || swatchColor is not { } argb)
+        {
+            SingingPreviewColorWash.Opacity = 0;
+            SingingPreviewStage.Background = defaultSingingPreviewBackground;
+            return;
+        }
+
+        byte r = (byte)(argb >> 16);
+        byte g = (byte)(argb >> 8);
+        byte b = (byte)argb;
+        static byte Blend(byte baseVal, byte target, double factor) =>
+            (byte)Math.Clamp((int)Math.Round(baseVal + (target - baseVal) * factor), 0, 255);
+
+        var top = Windows.UI.Color.FromArgb(255, Blend(0x16, r, 0.36), Blend(0x18, g, 0.36), Blend(0x1E, b, 0.36));
+        var bottom = Windows.UI.Color.FromArgb(255, Blend(0x0E, r, 0.22), Blend(0x10, g, 0.22), Blend(0x15, b, 0.22));
+        var baseGrad = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 1) };
+        baseGrad.GradientStops.Add(new GradientStop { Color = top, Offset = 0 });
+        baseGrad.GradientStops.Add(new GradientStop { Color = bottom, Offset = 1 });
+        SingingPreviewStage.Background = baseGrad;
+
+        var wash = new RadialGradientBrush
+        {
+            MappingMode = BrushMappingMode.RelativeToBoundingBox,
+            Center = new Point(0.5, 0.45),
+            GradientOrigin = new Point(0.5, 0.45),
+            RadiusX = 0.85,
+            RadiusY = 0.85
+        };
+        wash.GradientStops.Add(new GradientStop { Color = Windows.UI.Color.FromArgb(145, r, g, b), Offset = 0 });
+        wash.GradientStops.Add(new GradientStop { Color = Windows.UI.Color.FromArgb(45, r, g, b), Offset = 0.65 });
+        wash.GradientStops.Add(new GradientStop { Color = Windows.UI.Color.FromArgb(0, r, g, b), Offset = 1 });
+        SingingPreviewColorWash.Background = wash;
+        SingingPreviewColorWash.Opacity = 1;
+    }
+
+    private async Task EnsureStageSongCoverAsync(LibrarySongItem song)
+    {
+        string songId = song.Song.Id;
+        stageCoverLoadingId = songId;
+        try
+        {
+            await LoadCoverAsync(song);
+            if (!closed) RefreshSinging();
+        }
+        catch { /* Fallback to video frame or neutral tint. */ }
+        finally
+        {
+            if (stageCoverLoadingId == songId) stageCoverLoadingId = null;
+        }
     }
 
     private async Task LoadSingingPreviewFrameAsync(string videoPath)
@@ -331,11 +433,12 @@ public sealed partial class MainWindow
         singingPreviewCancellation = cancellation;
         try
         {
-            var frame = await SingingSession.ReadFirstFrameAsync(videoPath, cancellation.Token);
+            var (frame, color) = await SingingSession.ReadFirstFrameWithColorAsync(videoPath, cancellation.Token);
             if (closed || request != singingPreviewRevision) return;
             singingPreviewFramePath = videoPath;
             singingPreviewFrame = frame;
-            SetSingingPreviewSource(frame);
+            singingPreviewFrameColor = color;
+            RefreshSinging();
         }
         catch
         {
