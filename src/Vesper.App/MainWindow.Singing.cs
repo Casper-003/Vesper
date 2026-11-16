@@ -28,12 +28,19 @@ public sealed partial class MainWindow
     private uint? singingPreviewFrameColor;
     private CancellationTokenSource? singingPreviewCancellation;
     private string? stageCoverLoadingId;
+    private readonly FoliaFluidBackground previewFluid = new();
+    private string? cachedLyricsSongId;
+    private SongLyrics? cachedLyricsOnline;
+    private string? cachedLyricsLocal;
+    private bool cachedLyricsManual;
+    private string? cachedLyricsMediaPath;
+    private ParsedLyrics cachedParsedLyrics = new([], false, false, "None");
 
     private void InitializeSinging(ShellPreferences preferences)
     {
         singingView = new() { Visibility = Visibility.Collapsed };
         Grid.SetRowSpan(singingView, 2); Root.Children.Add(singingView);
-        singing = new(DispatcherQueue, viewModel.Queue, () => viewModel.Library.Songs.ToArray(), PresentPreparedSingingAsync);
+        singing = new(DispatcherQueue, viewModel.Queue, () => viewModel.Library.Songs.ToArray(), PresentPreparedSingingAsync, EnsurePlaybackLyricsAsync);
         singing.Playback.Attach(singingView.Video);
         SeekDuringSingingSwitch.IsOn = preferences.SingingSeekEnabled;
         ConfigureSingingStageButton();
@@ -45,6 +52,7 @@ public sealed partial class MainWindow
         singingView.ReturnRequested += () => { if (!singingExitPrompt) ReturnToBrowsing(); };
         singingView.PauseRequested += singing.TogglePause;
         singingView.NextRequested += OnSkipSinging;
+        singingView.ManageLyricsRequested += OnManageSingingLyrics;
         singingView.ExitRequested += OnExitSinging;
         singingView.SeekRequested += value => { if (SeekDuringSingingSwitch.IsOn) singing.Seek(value); };
         singingClock.Tick += (_, _) =>
@@ -69,6 +77,8 @@ public sealed partial class MainWindow
     private void ConfigureSingingStageButton()
     {
         defaultSingingPreviewBackground = SingingPreviewStage.Background;
+        previewFluid.StageCornerRadius = 6;
+        SingingPreviewColorWash.Children.Add(previewFluid);
         SingingPreviewColorWash.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(240) };
         foreach (Button button in new[] { SingingStagePlayButton, SingingCollapseButton })
         {
@@ -237,6 +247,7 @@ public sealed partial class MainWindow
             {
                 singingView.ResetTransition();
                 singingView.Visibility = Visibility.Collapsed;
+                RefreshSinging();
                 if ((ContentFrame.Content as ShellPage)?.PageKey == "首页") HomeSections.Focus(FocusState.Programmatic);
                 else if (singingPanelOpen) SingingStagePlayButton.Focus(FocusState.Programmatic);
                 else SingingOpenButton.Focus(FocusState.Programmatic);
@@ -278,9 +289,33 @@ public sealed partial class MainWindow
         if (e.PropertyName == nameof(MainViewModel.LibraryHero)) RefreshSinging();
     }
 
+    private async void OnManageSingingLyrics()
+    {
+        if (closed || singingExitPrompt) return;
+        var song = singing.CurrentSong is { } activeSong ? viewModel.FindSong(activeSong.Id)
+            : viewModel.Queue.Current is { } entry ? viewModel.FindSong(entry.SongId) : null;
+        if (song is null) return;
+        bool updated = await ShowLyricsManageDialogAsync(song, ElementTheme.Dark);
+        if (updated && !closed)
+        {
+            cachedLyricsSongId = null;
+            RefreshSinging();
+        }
+        if (!closed) singingView.Interact();
+    }
+
+    private void UpdateSingingClockCadence()
+    {
+        TimeSpan desired = singingVisible && singing.IsLyricsMode
+            ? TimeSpan.FromMilliseconds(33)
+            : TimeSpan.FromMilliseconds(200);
+        if (singingClock.Interval != desired) singingClock.Interval = desired;
+    }
+
     private void RefreshSinging()
     {
         if (singing is null || closed) return;
+        if (!DispatcherQueue.HasThreadAccess) { DispatcherQueue.TryEnqueue(RefreshSinging); return; }
         var entry = viewModel.Queue.Current;
         var nextEntry = entry ?? viewModel.Queue.Pending.FirstOrDefault();
         var previewSong = nextEntry is null ? null : viewModel.FindSong(nextEntry.SongId);
@@ -297,7 +332,9 @@ public sealed partial class MainWindow
         SingingPreviewCaption.Text = caption;
         SingingPreviewCaptionBar.Visibility = caption.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
 
-        UpdateStageArtwork(entry, previewSong, hasSong, caption);
+        uint? swatchColor = UpdateStageArtwork(entry, previewSong, hasSong, caption);
+        UpdateSingingLyricsStage(entry, previewSong, swatchColor);
+        UpdateSingingClockCadence();
 
         singingView.UpdateState(entry is not null, singing.Loading, singing.Ready,
             viewModel.Queue.State == PlaybackState.Paused, viewModel.Queue.Pending.Count, singing.Message, SeekDuringSingingSwitch.IsOn);
@@ -305,16 +342,88 @@ public sealed partial class MainWindow
         if (!singing.Loading && !singing.Ready && singing.Message.Length > 0) singingEntryRequested = false;
     }
 
-    private void UpdateStageArtwork(QueueEntry? currentEntry, LibrarySongItem? previewSong, bool hasSong, string caption)
+    private void UpdateSingingLyricsStage(QueueEntry? entry, LibrarySongItem? song, uint? swatchColor)
+    {
+        bool showLyrics = entry is not null && singing.IsLyricsMode;
+        if (!showLyrics || song is null)
+        {
+            singingView.UpdateLyricsPresentation(false, "", "", "", "", null, null, null, null, null, new([], false, false, "None"), 0, false, 0);
+            return;
+        }
+
+        SongDetails details = viewModel.GetSongDetails(song.Song.Id);
+        string? mediaPath = song.Song.AvailablePath;
+        if (!string.Equals(cachedLyricsSongId, song.Song.Id, StringComparison.Ordinal)
+            || !ReferenceEquals(cachedLyricsOnline, details.OnlineLyrics)
+            || !string.Equals(cachedLyricsLocal, details.Local?.Lyrics, StringComparison.Ordinal)
+            || cachedLyricsManual != details.LyricsManualOverride
+            || !string.Equals(cachedLyricsMediaPath, mediaPath, StringComparison.Ordinal))
+        {
+            cachedLyricsSongId = song.Song.Id;
+            cachedLyricsOnline = details.OnlineLyrics;
+            cachedLyricsLocal = details.Local?.Lyrics;
+            cachedLyricsManual = details.LyricsManualOverride;
+            cachedLyricsMediaPath = mediaPath;
+            cachedParsedLyrics = LyricifyService.Parse(details, mediaPath);
+        }
+
+        string? rawLyrics = null;
+        string? rawFormat = null;
+        string? translationLyrics = details.OnlineLyrics?.TranslationLyrics;
+        if (details.OnlineLyrics is { } online)
+        {
+            if (!string.IsNullOrWhiteSpace(online.WordLyricsFile))
+            {
+                rawLyrics = online.WordLyricsFile;
+                rawFormat = online.RawFormat;
+            }
+            else if (!string.IsNullOrWhiteSpace(online.SyncedLyrics))
+            {
+                rawLyrics = online.SyncedLyrics;
+            }
+            else if (!string.IsNullOrWhiteSpace(online.PlainText))
+            {
+                rawLyrics = online.PlainText;
+            }
+        }
+        if (string.IsNullOrWhiteSpace(rawLyrics) && !string.IsNullOrWhiteSpace(details.Local?.Lyrics))
+        {
+            rawLyrics = details.Local.Lyrics;
+        }
+        rawFormat ??= cachedParsedLyrics.SourceFormat;
+
+        double durationSeconds = singing.Playback.Duration.TotalSeconds > 0
+            ? singing.Playback.Duration.TotalSeconds
+            : song.DurationSeconds;
+        string songKey = $"{song.Song.Id}|{cachedParsedLyrics.SourceFormat}|{cachedParsedLyrics.Lines.Count}|{details.LyricsOffsetMs}|{details.LyricsManualOverride}";
+
+        singingView.UpdateLyricsPresentation(
+            showLyricsStage: true,
+            songKey: songKey,
+            title: song.Title,
+            artist: song.ArtistDetail,
+            album: song.Album,
+            coverUrl: song.CoverUrl,
+            dominantArgb: swatchColor,
+            rawLyrics: rawLyrics,
+            translationLyrics: translationLyrics,
+            rawFormat: rawFormat,
+            lyrics: cachedParsedLyrics,
+            offsetMs: details.LyricsOffsetMs,
+            loadingLyrics: singing.Loading && cachedParsedLyrics.Lines.Count == 0,
+            durationSeconds: durationSeconds);
+    }
+
+    private uint? UpdateStageArtwork(QueueEntry? currentEntry, LibrarySongItem? previewSong, bool hasSong, string caption)
     {
         if (!hasSong)
         {
             singingPreviewCancellation?.Cancel();
             singingPreviewCancellation = null;
             SetSingingPreviewSource(null, hasSong: false);
-            ApplySingingPreviewStageColor(null, hasSong: false);
+            ApplySingingPreviewStageColor(null, hasSong: false, hasVideoFrame: false);
             HomeSections.SetStagePresentation(null, false, "", null, hasSong: false, singing.Loading, false);
-            return;
+            return null;
         }
 
         if (previewSong is not null && previewSong.Cover is null && stageCoverLoadingId != previewSong.Song.Id)
@@ -336,7 +445,7 @@ public sealed partial class MainWindow
         }
         else
         {
-            // 无 MV 视频帧时不直接贴静态专辑封面图，改由专辑取色版呈现纯色舞台背景。
+            // 无 MV 视频帧时不直接贴静态专辑封面图，改由专辑取色版呈现流光舞台背景。
             displayImage = null;
             isVideo = false;
             if (videoPath is null)
@@ -361,8 +470,9 @@ public sealed partial class MainWindow
             swatchColor = previewSong.CoverColor;
 
         SetSingingPreviewSource(displayImage, hasSong: true);
-        ApplySingingPreviewStageColor(swatchColor, hasSong: true);
+        ApplySingingPreviewStageColor(swatchColor, hasSong: true, hasVideoFrame: isVideo && displayImage is not null);
         HomeSections.SetStagePresentation(displayImage, isVideo, caption, swatchColor, hasSong: true, singing.Loading, currentEntry is not null);
+        return swatchColor;
     }
 
     private void SetSingingPreviewSource(ImageSource? source, bool hasSong)
@@ -372,8 +482,9 @@ public sealed partial class MainWindow
         SingingPreviewPlaceholder.Visibility = !hasSong && source is null ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private void ApplySingingPreviewStageColor(uint? swatchColor, bool hasSong)
+    private void ApplySingingPreviewStageColor(uint? swatchColor, bool hasSong, bool hasVideoFrame)
     {
+        previewFluid.SetPresentation(hasSong ? swatchColor : null, hasSong && !hasVideoFrame && !singingVisible && singingPanelOpen);
         if (!hasSong || swatchColor is not { } argb)
         {
             SingingPreviewColorWash.Opacity = 0;
@@ -394,19 +505,20 @@ public sealed partial class MainWindow
         baseGrad.GradientStops.Add(new GradientStop { Color = bottom, Offset = 1 });
         SingingPreviewStage.Background = baseGrad;
 
-        var wash = new RadialGradientBrush
-        {
-            MappingMode = BrushMappingMode.RelativeToBoundingBox,
-            Center = new Point(0.5, 0.45),
-            GradientOrigin = new Point(0.5, 0.45),
-            RadiusX = 0.85,
-            RadiusY = 0.85
-        };
-        wash.GradientStops.Add(new GradientStop { Color = Windows.UI.Color.FromArgb(145, r, g, b), Offset = 0 });
-        wash.GradientStops.Add(new GradientStop { Color = Windows.UI.Color.FromArgb(45, r, g, b), Offset = 0.65 });
-        wash.GradientStops.Add(new GradientStop { Color = Windows.UI.Color.FromArgb(0, r, g, b), Offset = 1 });
-        SingingPreviewColorWash.Background = wash;
-        SingingPreviewColorWash.Opacity = 1;
+        SingingPreviewColorWash.Opacity = hasVideoFrame ? 0.22 : 1;
+        lastPreviewSwatchColor = swatchColor;
+        lastPreviewHasSong = hasSong;
+        lastPreviewHasVideoFrame = hasVideoFrame;
+    }
+
+    private uint? lastPreviewSwatchColor;
+    private bool lastPreviewHasSong, lastPreviewHasVideoFrame;
+
+    private void UpdateSingingPreviewFluidActive()
+    {
+        if (singing is null || closed) return;
+        previewFluid.SetPresentation(lastPreviewHasSong ? lastPreviewSwatchColor : null,
+            lastPreviewHasSong && !lastPreviewHasVideoFrame && !singingVisible && singingPanelOpen);
     }
 
     private async Task EnsureStageSongCoverAsync(LibrarySongItem song)

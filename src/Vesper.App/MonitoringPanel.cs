@@ -17,6 +17,7 @@ internal sealed class MonitoringPanel : UserControl, IDisposable
     private readonly TextBlock status = new() { Text = "返听已关闭", TextWrapping = TextWrapping.Wrap };
     private readonly TextBlock usage = new() { TextWrapping = TextWrapping.Wrap };
     private readonly Func<bool> mediaActive;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueue? uiDispatcher;
     private readonly DispatcherTimer diagnostics = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private IReadOnlyList<MonitoringDevice> inputDevices = [];
     private IReadOnlyList<MonitoringDevice> outputDevices = [];
@@ -34,6 +35,7 @@ internal sealed class MonitoringPanel : UserControl, IDisposable
     internal MonitoringPanel(ShellPreferences preferences, Func<bool> mediaActive)
     {
         this.mediaActive = mediaActive;
+        uiDispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread() ?? DispatcherQueue;
         var layout = new StackPanel { Spacing = 12, MaxWidth = 520, HorizontalAlignment = HorizontalAlignment.Left };
         Content = layout;
         HorizontalContentAlignment = HorizontalAlignment.Stretch;
@@ -265,7 +267,7 @@ internal sealed class MonitoringPanel : UserControl, IDisposable
             if (request != revision || disposed) return;
             WasapiMonitoring? current = null;
             current = new(source.Id, destination.Id, selectedMode,
-                error => DispatcherQueue.TryEnqueue(() =>
+                error => uiDispatcher?.TryEnqueue(() =>
                 {
                     if (disposed || !ReferenceEquals(engine, current)) return;
                     Stop();
@@ -372,7 +374,7 @@ internal sealed class MonitoringPanel : UserControl, IDisposable
         if (SelectedInput?.Id != inputId) return;
 
         WasapiMicMeter? meter = null;
-        meter = new WasapiMicMeter(inputId, error => DispatcherQueue.TryEnqueue(() =>
+        meter = new WasapiMicMeter(inputId, error => uiDispatcher?.TryEnqueue(() =>
         {
             if (disposed || !ReferenceEquals(probe, meter)) return;
             StopProbe();

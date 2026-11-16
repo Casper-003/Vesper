@@ -5,7 +5,9 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Lyricify.Lyrics.Helper" Version="0.2.1" />
     <PackageReference Include="ToolGood.Words" Version="3.1.0.3" />
+    <Content Include="ThirdParty/Lyricify.Lyrics.Helper.LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="ThirdParty/ToolGood.Words.LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -168,11 +168,18 @@ public sealed partial class AdditionalSongSources(HttpClient http, MusicBrainzCl
             var lyrics = new List<LyricsCandidate>();
             foreach (var entry in entries.Where(entry => artistHint.Length == 0 || SongNameMatching.SameArtist(entry.Match.Artist, artistHint)).Take(3))
             {
-                using var json = await GetAsync($"https://music.163.com/api/song/lyric?id={entry.Id}&lv=-1&kv=-1&tv=-1", token);
-                if (!json.RootElement.TryGetProperty("lrc", out var lrc)) continue;
-                string text = MusicBrainzClient.Text(lrc, "lyric");
-                if (text.Length > 0) lyrics.Add(new(entry.Id, entry.Match.Title, entry.Match.Artist, entry.Match.Album,
-                    entry.Duration, "", text, SourceUrl: "https://music.163.com/song?id=" + entry.Id));
+                using var json = await GetAsync($"https://music.163.com/api/song/lyric?id={entry.Id}&lv=-1&kv=-1&tv=-1&yv=-1", token);
+                string lrcText = json.RootElement.TryGetProperty("lrc", out var lrc) ? MusicBrainzClient.Text(lrc, "lyric") : "";
+                string yrcText = json.RootElement.TryGetProperty("yrc", out var yrc) ? MusicBrainzClient.Text(yrc, "lyric") : "";
+                string transText = json.RootElement.TryGetProperty("tlyric", out var tlyric) ? MusicBrainzClient.Text(tlyric, "lyric") : "";
+                if (lrcText.Length == 0 && yrcText.Length == 0) continue;
+                bool hasYrc = yrcText.Length > 0 && LyricifyService.ContainsWordTimings(yrcText);
+                lyrics.Add(new(entry.Id, entry.Match.Title, entry.Match.Artist, entry.Match.Album,
+                    entry.Duration, "", lrcText, hasYrc ? yrcText : "", hasYrc, SourceUrl: "https://music.163.com/song?id=" + entry.Id)
+                {
+                    TranslationLyrics = transText,
+                    RawFormat = hasYrc ? "Yrc" : "Lrc"
+                });
             }
             return lyrics;
         }, () => SearchKugou(title, artistHint, token));

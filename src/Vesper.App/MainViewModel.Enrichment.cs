@@ -67,7 +67,9 @@ public sealed partial class MainViewModel
             {
                 Online = current.Online is null || current.Online.SourceUrl.Contains("lrclib.net", StringComparison.OrdinalIgnoreCase)
                     ? result.Metadata ?? current.Online : current.Online,
-                OnlineLyrics = current.OnlineLyrics ?? result.Lyrics,
+                OnlineLyrics = current.LyricsManualOverride
+                    ? current.OnlineLyrics
+                    : current.OnlineLyrics ?? result.Lyrics,
                 Lookup = new(expected.Key, clock.GetUtcNow(), result.MetadataOutcome, result.LyricsOutcome)
             };
             Library.Details[id] = updated;

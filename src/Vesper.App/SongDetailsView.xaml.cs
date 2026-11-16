@@ -55,7 +55,7 @@ public sealed partial class SongDetailsView : UserControl
             if (observedSong is not null) observedSong.PropertyChanged += OnSongChanged;
         }
         DataContext = current;
-        EditButton.IsEnabled = SearchButton.IsEnabled = !host.Model.ReadOnly && Song is not null;
+        EditButton.IsEnabled = SearchButton.IsEnabled = EditLyricsButton.IsEnabled = !host.Model.ReadOnly && Song is not null;
         RefreshEntityLinks();
     }
 
@@ -222,6 +222,12 @@ public sealed partial class SongDetailsView : UserControl
     { if (Song is { } song) await host.Model.ToggleFavoriteAsync(song); }
     private async void OnQueue(object sender, RoutedEventArgs e)
     { if (Song is { } song) await host.QueueSongAsync(song, sender as FrameworkElement); }
+    private async void OnManageLyrics(object sender, RoutedEventArgs e)
+    {
+        if (dialogOpen || Song is not { } song) return;
+        await host.ShowLyricsManageDialogAsync(song, ActualTheme);
+        if (IsLoaded) RefreshSong();
+    }
 
     private async void OnEdit(object sender, RoutedEventArgs e)
     {

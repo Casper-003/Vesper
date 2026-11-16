@@ -34,6 +34,7 @@ public sealed partial class MainViewModel
     }
 
     public LibrarySongItem? FindSong(string id) => songItems.GetValueOrDefault(ResolveSongId(id));
+    public SongDetails GetSongDetails(string id) => Library.Details.GetValueOrDefault(ResolveSongId(id)) ?? new();
     public SongMetadata GetSongMetadata(string id) => Library.Details.GetValueOrDefault(ResolveSongId(id))?.Effective("") ?? new();
     public SongLookupInput? GetLookupInput(string id)
     {
@@ -50,7 +51,9 @@ public sealed partial class MainViewModel
             {
                 Online = current.Online is null || current.Online.SourceUrl.Contains("lrclib.net", StringComparison.OrdinalIgnoreCase)
                     ? result.Metadata ?? current.Online : current.Online,
-                OnlineLyrics = current.OnlineLyrics ?? result.Lyrics,
+                OnlineLyrics = current.LyricsManualOverride
+                    ? current.OnlineLyrics
+                    : ShouldReplaceLyrics(current.OnlineLyrics, result.Lyrics) ? result.Lyrics : current.OnlineLyrics,
                 Lookup = new(expected.Key, clock.GetUtcNow(), result.MetadataOutcome, result.LyricsOutcome)
             } : current,
         (current, previous, updated) => current with
@@ -59,6 +62,15 @@ public sealed partial class MainViewModel
             OnlineLyrics = current.OnlineLyrics == updated.OnlineLyrics ? previous.OnlineLyrics : current.OnlineLyrics,
             Lookup = current.Lookup == updated.Lookup ? previous.Lookup : current.Lookup
         }, null);
+
+    private static bool ShouldReplaceLyrics(SongLyrics? existing, SongLyrics? candidate)
+    {
+        if (candidate is null) return false;
+        if (existing is null) return true;
+        if (candidate.HasWordSync && !existing.HasWordSync) return true;
+        if (string.IsNullOrWhiteSpace(existing.SyncedLyrics) && !string.IsNullOrWhiteSpace(candidate.SyncedLyrics)) return true;
+        return false;
+    }
 
     public void ApplyLocalMetadata(LibrarySongItem item, string path, SongMetadata metadata)
     {
@@ -88,17 +100,36 @@ public sealed partial class MainViewModel
                 bool changed = !(old.Title == title.Trim() || SongNameMatching.Same(old.Title, title.Trim()))
                     || !(old.Artist == artist.Trim() || SongNameMatching.SameArtist(old.Artist, artist.Trim()));
                 return previous with { Corrections = new(title.Trim(), artist.Trim(), album.Trim(), clock.GetUtcNow()), Video = null,
-                    Lookup = null, Online = changed ? null : previous.Online, OnlineLyrics = changed ? null : previous.OnlineLyrics };
+                    Lookup = null, Online = changed ? null : previous.Online,
+                    OnlineLyrics = changed && !previous.LyricsManualOverride ? null : previous.OnlineLyrics,
+                    LyricsManualOverride = changed ? false : previous.LyricsManualOverride };
             },
             (current, previous, updated) => current.Corrections == updated.Corrections
-                ? current with { Corrections = previous.Corrections, Video = previous.Video, Lookup = previous.Lookup, Online = previous.Online, OnlineLyrics = previous.OnlineLyrics } : current,
+                ? current with { Corrections = previous.Corrections, Video = previous.Video, Lookup = previous.Lookup, Online = previous.Online, OnlineLyrics = previous.OnlineLyrics, LyricsManualOverride = previous.LyricsManualOverride } : current,
             "歌曲资料已保存");
     }
 
     public Task<bool> SaveOnlineMetadataAsync(string id, SongMetadata metadata) => SaveDetailsAsync(id,
-        previous => previous with { Online = metadata, Video = null, OnlineLyrics = null, Lookup = null },
+        previous => previous with { Online = metadata, Video = null, OnlineLyrics = previous.LyricsManualOverride ? previous.OnlineLyrics : null, Lookup = null },
         (current, previous, updated) => current.Online == updated.Online ? current with { Online = previous.Online, Video = previous.Video, OnlineLyrics = previous.OnlineLyrics, Lookup = previous.Lookup } : current,
         "已保存匹配资料");
+
+    public Task<bool> SaveManualLyricsAsync(string id, SongLyrics lyrics, int offsetMs) => SaveDetailsAsync(id,
+        previous => previous with { OnlineLyrics = lyrics, LyricsOffsetMs = offsetMs, LyricsManualOverride = true },
+        (current, previous, updated) => current.OnlineLyrics == updated.OnlineLyrics && current.LyricsOffsetMs == updated.LyricsOffsetMs
+            ? current with { OnlineLyrics = previous.OnlineLyrics, LyricsOffsetMs = previous.LyricsOffsetMs, LyricsManualOverride = previous.LyricsManualOverride } : current,
+        "已保存歌词设置");
+
+    public Task<bool> SaveLyricsOffsetAsync(string id, int offsetMs) => SaveDetailsAsync(id,
+        previous => previous with { LyricsOffsetMs = offsetMs },
+        (current, previous, updated) => current.LyricsOffsetMs == updated.LyricsOffsetMs ? current with { LyricsOffsetMs = previous.LyricsOffsetMs } : current,
+        null);
+
+    public Task<bool> SaveUpgradedLyricsAsync(string id, SongLyrics lyrics) => SaveDetailsAsync(id,
+        previous => previous.LyricsManualOverride || !ShouldReplaceLyrics(previous.OnlineLyrics, lyrics)
+            ? previous : previous with { OnlineLyrics = lyrics },
+        (current, previous, updated) => current.OnlineLyrics == updated.OnlineLyrics ? current with { OnlineLyrics = previous.OnlineLyrics } : current,
+        null);
 
     public Task<bool> SaveVideoMatchAsync(string id, MusicVideoMatch video, string expectedTitle, string expectedArtist) => SaveDetailsAsync(id,
         previous => previous.Effective("") is var metadata && metadata.Title == expectedTitle && metadata.Artist == expectedArtist

@@ -24,6 +24,8 @@ public sealed record SongDetails(SongMetadata? Local = null, SongMetadata? Onlin
     public string LocalResolution { get; init; } = "";
     public SongAssetState? Assets { get; init; }
     public SongVideoLookupState? VideoLookup { get; init; }
+    public int LyricsOffsetMs { get; init; }
+    public bool LyricsManualOverride { get; init; }
     public SongMetadata Effective(string fallbackTitle)
     {
         var local = Local ?? new();
@@ -101,5 +103,15 @@ public sealed record SongDetails(SongMetadata? Local = null, SongMetadata? Onlin
 
     public SongDetails Merge(SongDetails other) => new(Local ?? other.Local, Online ?? other.Online,
         Corrections is null || other.Corrections?.ModifiedAt > Corrections.ModifiedAt ? other.Corrections : Corrections,
-        Video ?? other.Video, OnlineLyrics ?? other.OnlineLyrics, Lookup ?? other.Lookup);
+        Video ?? other.Video,
+        LyricsManualOverride ? OnlineLyrics : other.LyricsManualOverride ? other.OnlineLyrics : OnlineLyrics ?? other.OnlineLyrics,
+        Lookup ?? other.Lookup)
+    {
+        LocalReadKey = LocalReadKey.Length > 0 ? LocalReadKey : other.LocalReadKey,
+        LocalResolution = LocalResolution.Length > 0 ? LocalResolution : other.LocalResolution,
+        Assets = Assets ?? other.Assets,
+        VideoLookup = VideoLookup ?? other.VideoLookup,
+        LyricsOffsetMs = LyricsOffsetMs != 0 ? LyricsOffsetMs : other.LyricsOffsetMs,
+        LyricsManualOverride = LyricsManualOverride || other.LyricsManualOverride
+    };
 }

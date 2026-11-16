@@ -20,4 +20,10 @@
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2705" />
     <ProjectReference Include="../Vesper.Core/Vesper.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Content Remove="Assets\FoliaStage\**" />
+    <None Remove="Assets\FoliaStage\**" />
+    <None Include="Assets\FoliaStage\**" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="ThirdParty\folia-major.LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
