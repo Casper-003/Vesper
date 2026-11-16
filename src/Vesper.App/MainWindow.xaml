@@ -330,6 +330,10 @@
           <TextBlock Text="演唱" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,20,0,0"/>
           <ToggleSwitch x:Name="SeekDuringSingingSwitch" Header="允许拖动演唱进度" OnContent="可拖动定位" OffContent="仅显示进度" IsOn="True" Toggled="OnSingingSeekPreferenceChanged"/>
           <ToggleSwitch x:Name="LinkRightPanelsSwitch" Header="右侧演唱入口与待播队列联动" OnContent="同时展开" OffContent="单独展开" IsOn="True" Toggled="OnRightPanelModeChanged"/>
+          <TextBlock Text="开源与许可" Style="{StaticResource SubtitleTextBlockStyle}" Margin="0,20,0,0"/>
+          <TextBlock Text="Vesper 依据 GNU AGPL-3.0 开源许可证发布，按“现状”提供且不附带任何担保。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" MaxWidth="560" HorizontalAlignment="Left"/>
+          <TextBlock Text="全屏歌词视觉舞台基于 chthollyphile/folia-major（GNU AGPL-3.0）；多源歌词解析使用 Lyricify.Lyrics.Helper（Apache-2.0）；检索拼音转换使用 ToolGood.Words（Apache-2.0）；雾笺笔顺数据源自 AnimCJK（Arphic Public License）。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12" TextWrapping="Wrap" MaxWidth="560" HorizontalAlignment="Left"/>
+          <HyperlinkButton Content="查看完整对应源码与许可证（GitHub）" NavigateUri="https://github.com/Casper-003/Vesper" Padding="0,2"/>
         </StackPanel>
         </ScrollViewer>
         </Grid>

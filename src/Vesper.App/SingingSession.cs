@@ -13,20 +13,23 @@ internal sealed class SingingSession : IDisposable
     private readonly PlaybackQueue queue;
     private readonly Func<IEnumerable<Song>> library;
     private readonly Func<Task> present;
+    private readonly Func<Song, CancellationToken, Task>? ensureLyrics;
     private CancellationTokenSource? preparation;
     private long revision;
     private bool disposed;
     public LocalMediaPlayback Playback { get; }
     public bool Loading { get; private set; }
     public bool Ready { get; private set; }
+    public bool IsLyricsMode => Ready && Playback.VideoWidth == 0;
+    public Song? CurrentSong { get; private set; }
     public string Message { get; private set; } = "";
     public BitmapImage? FirstFrame { get; private set; }
     public event Action? Changed;
 
     public SingingSession(DispatcherQueue dispatcher, PlaybackQueue queue,
-        Func<IEnumerable<Song>> library, Func<Task> present)
+        Func<IEnumerable<Song>> library, Func<Task> present, Func<Song, CancellationToken, Task>? ensureLyrics = null)
     {
-        this.queue = queue; this.library = library; this.present = present;
+        this.queue = queue; this.library = library; this.present = present; this.ensureLyrics = ensureLyrics;
         Playback = new(dispatcher);
         Playback.Ended += OnEnded;
         Playback.Failed += OnFailed;
@@ -41,6 +44,7 @@ internal sealed class SingingSession : IDisposable
         preparation = cancellation;
         Playback.Stop(); Ready = false; FirstFrame = null; Message = "";
         Song? song = queue.StartNext(library(), out int skipped);
+        CurrentSong = song;
         Loading = song is not null;
         if (skipped > 0) Message = song is null ? "没有可播放的待播歌曲" : $"已跳过 {skipped} 首不可用歌曲";
         Changed?.Invoke();
@@ -49,16 +53,32 @@ internal sealed class SingingSession : IDisposable
         {
             string? path = FindVideoPath(song) ?? song.AvailablePath;
             if (path is null) throw new FileNotFoundException();
+            Task? lyricsTask = null;
+            if (FindVideoPath(song) is null && ensureLyrics is not null)
+                lyricsTask = EnsureLyricsSafeAsync(song, cancellation.Token);
+
             await Playback.PrepareAsync(path, cancellation.Token);
             if (request != revision || disposed) return;
-            if (Playback.VideoWidth == 0)
-                throw new NotSupportedException("这首歌没有可用的本地视频；歌词演唱尚未开放，歌曲已保留在待播队首。");
 
-            // Decode an actual frame into a XAML image before expanding. MediaOpened
-            // alone is not evidence that the native video surface has painted.
-            var decodedFrame = await ReadFirstFrameAsync(path, cancellation.Token);
-            if (request != revision || disposed) return;
-            FirstFrame = decodedFrame;
+            if (Playback.VideoWidth > 0)
+            {
+                // Decode an actual frame into a XAML image before expanding. MediaOpened
+                // alone is not evidence that the native video surface has painted.
+                var decodedFrame = await ReadFirstFrameAsync(path, cancellation.Token);
+                if (request != revision || disposed) return;
+                FirstFrame = decodedFrame;
+            }
+            else
+            {
+                FirstFrame = null;
+                if (lyricsTask is not null && !lyricsTask.IsCompleted)
+                {
+                    try { await lyricsTask.WaitAsync(TimeSpan.FromMilliseconds(3500), cancellation.Token); }
+                    catch (TimeoutException) { /* 本地音乐不阻塞进场，歌词就绪后会实时刷新到舞台。 */ }
+                }
+                if (request != revision || disposed) return;
+            }
+
             Ready = true; Changed?.Invoke();
             await present();
             cancellation.Token.ThrowIfCancellationRequested();
@@ -69,14 +89,22 @@ internal sealed class SingingSession : IDisposable
         catch (Exception error)
         {
             if (request != revision || disposed) return;
-            Playback.Stop(); Ready = Loading = false; FirstFrame = null;
+            Playback.Stop(); Ready = Loading = false; FirstFrame = null; CurrentSong = null;
             queue.ExitSession();
             Message = error is NotSupportedException ? error.Message
                 : error is OperationCanceledException ? "播放准备超时，请重试。歌曲仍在待播队首。"
-                : "无法准备本地视频，请检查文件、编码或系统解码支持。歌曲仍在待播队首。";
+                : "无法播放当前文件，请检查文件、编码或系统解码支持。歌曲仍在待播队首。";
             Changed?.Invoke();
         }
         finally { if (ReferenceEquals(preparation, cancellation)) preparation = null; }
+    }
+
+    private async Task EnsureLyricsSafeAsync(Song song, CancellationToken token)
+    {
+        if (ensureLyrics is null) return;
+        try { await ensureLyrics(song, token); }
+        catch (OperationCanceledException) { }
+        catch { /* 自动歌词补全失败不阻断本地音频演唱。 */ }
     }
 
     internal static async Task<BitmapImage> ReadFirstFrameAsync(string path, CancellationToken token)
@@ -157,7 +185,7 @@ internal sealed class SingingSession : IDisposable
         // PrepareAsync handles its own failure. Runtime failure retains the current
         // entry at the head instead of pretending it naturally finished.
         if (Loading || disposed) return;
-        revision++; Ready = false; FirstFrame = null;
+        revision++; Ready = false; FirstFrame = null; CurrentSong = null;
         queue.ExitSession(); Message = "播放中断，歌曲已保留在待播队首。";
         Changed?.Invoke();
     }
@@ -165,7 +193,7 @@ internal sealed class SingingSession : IDisposable
     public void Exit()
     {
         revision++; preparation?.Cancel(); preparation = null;
-        Playback.Stop(); Ready = Loading = false; FirstFrame = null; Message = "";
+        Playback.Stop(); Ready = Loading = false; FirstFrame = null; CurrentSong = null; Message = "";
         queue.ExitSession(); Changed?.Invoke();
     }
 

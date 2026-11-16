@@ -27,6 +27,14 @@ git clone https://github.com/Casper-003/Vesper.git
 
 每人/每台电脑使用独立克隆。分支、身份与同步约定见 AGENTS；个人曲库、录音、缓存、凭据和本机配置不入库。
 
-## 许可证
+## 许可证与源码
 
-见 [LICENSE](LICENSE)。第三方库及媒体内容分别核对来源许可。
+- 本项目整体以 **GNU Affero General Public License v3.0（AGPL-3.0）** 开源发布，详见根目录 [LICENSE](LICENSE)；Vesper 原有自研代码保留原版权声明（Copyright (c) 2026 Casper），在与 AGPL-3.0 组件整合分发时适用 AGPL-3.0。
+- 全屏歌词视觉舞台集成自 [chthollyphile/folia-major](https://github.com/chthollyphile/folia-major)（AGPL-3.0，位于子模块 `third_party/folia-major`），Vesper 适配层源码位于 `src/Vesper.FoliaStage/`，可通过 `scripts/build-folia-stage.ps1` 从对应源码重新构建至 `src/Vesper.App/Assets/FoliaStage/`。
+- 其他第三方组件（`Lyricify.Lyrics.Helper`、ToolGood.Words、AnimCJK 笔顺数据）许可分别保留于 `src/*/ThirdParty/` 及 `Assets/FoliaStage/licenses/`；媒体文件及曲库内容不适用上述软件许可。
+
+拉取完整对应源码（含子模块）：
+
+```powershell
+git clone --recurse-submodules https://github.com/Casper-003/Vesper.git
+```

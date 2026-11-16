@@ -42,7 +42,11 @@
           <HyperlinkButton Content="查看已匹配的 MV" NavigateUri="{Binding MatchedVideoUrl}" Padding="0" HorizontalAlignment="Left" Visibility="{Binding HasMatchedVideo, Converter={StaticResource BoolVisibility}}"/>
         </StackPanel>
         <StackPanel Spacing="16">
-          <TextBlock Text="歌词" Style="{StaticResource SubtitleTextBlockStyle}"/>
+          <Grid ColumnSpacing="8">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <TextBlock Text="歌词" Style="{StaticResource SubtitleTextBlockStyle}" VerticalAlignment="Center"/>
+            <Button x:Name="EditLyricsButton" Grid.Column="1" Width="32" Height="32" Padding="0" Style="{StaticResource SubtleButtonStyle}" Click="OnManageLyrics" ToolTipService.ToolTip="匹配或修改歌词" AutomationProperties.Name="匹配或修改歌词"><FontIcon Glyph="&#xE90B;" FontSize="15"/></Button>
+          </Grid>
           <TextBlock Text="{Binding Lyrics}" FontSize="18" LineHeight="32" TextWrapping="Wrap" IsTextSelectionEnabled="True" Visibility="{Binding HasLyrics, Converter={StaticResource BoolVisibility}}"/>
           <TextBlock Text="暂无歌词" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="{Binding HasNoLyrics, Converter={StaticResource BoolVisibility}}"/>
           <HyperlinkButton Content="{Binding LyricsSourceLabel}" NavigateUri="{Binding LyricsSourceUrl}" Padding="0" HorizontalAlignment="Left" Visibility="{Binding HasLyricsSource, Converter={StaticResource BoolVisibility}}"/>

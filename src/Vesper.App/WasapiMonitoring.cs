@@ -381,7 +381,10 @@ internal sealed class WasapiMonitoring : IDisposable
         }
         catch (Exception error)
         {
-            if (!started.TrySetException(error) && Volatile.Read(ref disposed) == 0) failed(error);
+            if (!started.TrySetException(error) && Volatile.Read(ref disposed) == 0)
+            {
+                try { failed(error); } catch { /* Do not terminate the worker thread. */ }
+            }
         }
         finally
         {
@@ -492,7 +495,10 @@ internal sealed class WasapiMicMeter : IDisposable
         }
         catch (Exception error)
         {
-            if (Volatile.Read(ref disposed) == 0) failed?.Invoke(error);
+            if (Volatile.Read(ref disposed) == 0)
+            {
+                try { failed?.Invoke(error); } catch { /* Do not terminate the worker thread. */ }
+            }
         }
         finally
         {

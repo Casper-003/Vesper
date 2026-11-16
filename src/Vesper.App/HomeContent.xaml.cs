@@ -23,6 +23,7 @@ public sealed partial class HomeContent : UserControl
     private readonly MixerVolumeControl vocalControl;
     private readonly MixerVolumeControl bgmControl;
     private readonly MixerLevelMeter micMeter;
+    private readonly FoliaFluidBackground stageFluid = new();
     private readonly DispatcherTimer meterTimer = new() { Interval = TimeSpan.FromMilliseconds(33) };
     private readonly SolidColorBrush greenLedBrush = new(Color.FromArgb(255, 0x22, 0xC5, 0x5E));
     private readonly SolidColorBrush redLedBrush = new(Color.FromArgb(255, 0xEF, 0x44, 0x44));
@@ -36,6 +37,9 @@ public sealed partial class HomeContent : UserControl
     private bool stagePointerInside;
     private bool stageButtonFocused;
     private bool stageLoading;
+    private bool stageHasSong;
+    private bool stageHasVideoFrame;
+    private uint? stageSwatchColor;
     private double smoothedLevel;
     private double peakHoldLevel;
     private int peakHoldTicks;
@@ -67,6 +71,8 @@ public sealed partial class HomeContent : UserControl
         };
 
         ConfigureStageButtonVisuals();
+        stageFluid.StageCornerRadius = 11;
+        StageColorWash.Children.Add(stageFluid);
         StageScreenClip.SizeChanged += OnStageScreenClipSizeChanged;
         StageEnterButton.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(160) };
         StageCaptionBar.OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(180) };
@@ -128,12 +134,16 @@ public sealed partial class HomeContent : UserControl
         if (active) _ = controller?.EnsureDevicesLoadedAsync();
         SyncMeterTimer();
         SyncFromController();
+        stageFluid.SetPresentation(stageSwatchColor, homeActive && stageHasSong && !stageHasVideoFrame);
     }
 
     internal void SetStagePresentation(ImageSource? image, bool isVideoFrame, string caption, uint? swatchColor,
         bool hasSong, bool isLoading, bool isPlayingSession)
     {
         stageLoading = isLoading;
+        stageHasSong = hasSong;
+        stageHasVideoFrame = isVideoFrame && image is not null;
+        stageSwatchColor = swatchColor;
         StagePlayGlyph.Visibility = isLoading ? Visibility.Collapsed : Visibility.Visible;
         StageLoadingRing.IsActive = isLoading;
         StageLoadingRing.Visibility = isLoading ? Visibility.Visible : Visibility.Collapsed;
@@ -161,7 +171,7 @@ public sealed partial class HomeContent : UserControl
         StageCaptionText.Text = hasSong ? caption : "";
         StageCaptionBar.Opacity = hasSong && !string.IsNullOrWhiteSpace(caption) ? 1 : 0;
 
-        ApplyStageAlbumColor(hasSong ? swatchColor : null, hasSong);
+        ApplyStageAlbumColor(hasSong ? swatchColor : null, hasSong, isVideoFrame && image is not null);
         RefreshStageEnterButtonVisibility();
     }
 
@@ -172,8 +182,9 @@ public sealed partial class HomeContent : UserControl
             .TransformBounds(new Rect(0, 0, StageScreenBorder.ActualWidth, StageScreenBorder.ActualHeight));
     }
 
-    private void ApplyStageAlbumColor(uint? swatchColor, bool hasSong)
+    private void ApplyStageAlbumColor(uint? swatchColor, bool hasSong, bool hasVideoFrame)
     {
+        stageFluid.SetPresentation(hasSong ? swatchColor : null, homeActive && hasSong && !hasVideoFrame);
         if (!hasSong || swatchColor is not { } argb)
         {
             StageAmbientGlow.Opacity = 0;
@@ -191,28 +202,14 @@ public sealed partial class HomeContent : UserControl
             (byte)Math.Clamp((int)Math.Round(baseVal + (target - baseVal) * factor), 0, 255);
 
         var topScreen = Color.FromArgb(255, Blend(0x14, r, 0.36), Blend(0x16, g, 0.36), Blend(0x1C, b, 0.36));
-        var midScreen = Color.FromArgb(255, Blend(0x11, r, 0.28), Blend(0x13, g, 0.28), Blend(0x18, b, 0.28));
         var botScreen = Color.FromArgb(255, Blend(0x0D, r, 0.18), Blend(0x0F, g, 0.18), Blend(0x14, b, 0.18));
         var screenGrad = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(1, 1) };
         screenGrad.GradientStops.Add(new GradientStop { Color = topScreen, Offset = 0 });
-        screenGrad.GradientStops.Add(new GradientStop { Color = midScreen, Offset = 0.55 });
         screenGrad.GradientStops.Add(new GradientStop { Color = botScreen, Offset = 1 });
         StageScreenBorder.Background = screenGrad;
         StageScreenBorder.BorderBrush = new SolidColorBrush(Color.FromArgb(165, r, g, b));
 
-        var washBrush = new RadialGradientBrush
-        {
-            MappingMode = BrushMappingMode.RelativeToBoundingBox,
-            Center = new Point(0.5, 0.45),
-            GradientOrigin = new Point(0.5, 0.45),
-            RadiusX = 0.80,
-            RadiusY = 0.80
-        };
-        washBrush.GradientStops.Add(new GradientStop { Color = Color.FromArgb(150, r, g, b), Offset = 0 });
-        washBrush.GradientStops.Add(new GradientStop { Color = Color.FromArgb(52, r, g, b), Offset = 0.65 });
-        washBrush.GradientStops.Add(new GradientStop { Color = Color.FromArgb(0, r, g, b), Offset = 1 });
-        StageColorWash.Background = washBrush;
-        StageColorWash.Opacity = 1;
+        StageColorWash.Opacity = hasVideoFrame ? 0.25 : 1;
 
         var ambientBrush = new RadialGradientBrush
         {

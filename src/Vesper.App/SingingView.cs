@@ -18,6 +18,7 @@ internal sealed class SingingView : UserControl, IDisposable
     }
     internal readonly MediaPlayerElement Video = new() { AreTransportControlsEnabled = false, Stretch = Stretch.Uniform };
     private readonly Image firstFrame = new() { Stretch = Stretch.Uniform, IsHitTestVisible = false, Visibility = Visibility.Collapsed };
+    private readonly FoliaLyricsStage lyricsStage = new() { Visibility = Visibility.Collapsed };
     private readonly Grid layout = new() { Background = new SolidColorBrush(Colors.Black) };
     private readonly Grid toolbar = new() { RowSpacing = 12, Margin = new Thickness(32, 0, 32, 28), VerticalAlignment = VerticalAlignment.Bottom };
     internal readonly Slider Progress = new SeekSlider { Minimum = 0, Maximum = 1, HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -27,6 +28,7 @@ internal sealed class SingingView : UserControl, IDisposable
     internal readonly Button Back = GlassButton("\uE72B", "返回选歌");
     internal readonly Button Pause = GlassButton("\uE769", "暂停演唱");
     internal readonly Button Next = GlassButton("\uE893", "切歌");
+    internal readonly Button LyricsButton = GlassButton("\uE90B", "匹配/修改歌词");
     internal readonly Button ExitButton = GlassButton("\uE8BB", "退出本场");
     internal readonly Button Start = new() { Content = "开始演唱", HorizontalAlignment = HorizontalAlignment.Center, MinWidth = 120 };
     private readonly TextBlock waitingTitle = new() { FontSize = 28, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextAlignment = TextAlignment.Center };
@@ -38,17 +40,18 @@ internal sealed class SingingView : UserControl, IDisposable
     private Storyboard? transition;
     private TaskCompletionSource? transitionCompletion;
     private bool syncing, dragging, keyboardInControls, active, pinned, wasPaused, allowSeek = true;
+    private TimeSpan lastPosition, lastLength;
     private long lastInteraction;
     private string pauseLabel = "";
     internal bool ControlsVisible => toolbar.Visibility == Visibility.Visible;
     internal bool IsDragging => dragging;
-    public event Action? ReturnRequested, PauseRequested, NextRequested, ExitRequested, StartRequested;
+    public event Action? ReturnRequested, PauseRequested, NextRequested, ExitRequested, StartRequested, ManageLyricsRequested;
     public event Action<TimeSpan>? SeekRequested;
 
     public SingingView()
     {
         RequestedTheme = ElementTheme.Dark; IsTabStop = true; Content = layout;
-        layout.Children.Add(Video); layout.Children.Add(firstFrame);
+        layout.Children.Add(Video); layout.Children.Add(firstFrame); layout.Children.Add(lyricsStage);
         waiting.Children.Add(loading); waiting.Children.Add(waitingTitle); waiting.Children.Add(waitingText); waiting.Children.Add(Start);
         layout.Children.Add(waiting);
         toolbar.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -65,15 +68,23 @@ internal sealed class SingingView : UserControl, IDisposable
         Back.HorizontalAlignment = HorizontalAlignment.Left; buttons.Children.Add(Back);
         var central = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 28, HorizontalAlignment = HorizontalAlignment.Center };
         central.Children.Add(Pause); central.Children.Add(Next); Grid.SetColumn(central, 1); buttons.Children.Add(central);
-        ExitButton.HorizontalAlignment = HorizontalAlignment.Right; Grid.SetColumn(ExitButton, 2); buttons.Children.Add(ExitButton);
+        var rightGroup = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 20, HorizontalAlignment = HorizontalAlignment.Right };
+        LyricsButton.Visibility = Visibility.Collapsed;
+        rightGroup.Children.Add(LyricsButton);
+        rightGroup.Children.Add(ExitButton);
+        Grid.SetColumn(rightGroup, 2); buttons.Children.Add(rightGroup);
         Grid.SetRow(buttons, 1); toolbar.Children.Add(buttons); layout.Children.Add(toolbar);
         RenderTransform = expansion; RenderTransformOrigin = new Point(.5, .5);
         TabFocusNavigation = KeyboardNavigationMode.Cycle;
         Back.Click += (_, _) => ReturnRequested?.Invoke();
         Pause.Click += (_, _) => PauseRequested?.Invoke();
         Next.Click += (_, _) => NextRequested?.Invoke();
+        LyricsButton.Click += (_, _) => ManageLyricsRequested?.Invoke();
         ExitButton.Click += (_, _) => ExitRequested?.Invoke();
         Start.Click += (_, _) => StartRequested?.Invoke();
+        lyricsStage.ManageLyricsRequested += () => ManageLyricsRequested?.Invoke();
+        lyricsStage.SeekRequested += value => { if (allowSeek) { Interact(); SeekRequested?.Invoke(value); } };
+        lyricsStage.Interacted += Interact;
         Progress.ValueChanged += (_, _) => { if (!syncing && allowSeek) { Interact(); SeekRequested?.Invoke(TimeSpan.FromSeconds(Progress.Value)); } };
         Progress.AddHandler(PointerPressedEvent, new PointerEventHandler((_, _) => { dragging = true; Interact(); }), true);
         void EndDrag() { dragging = false; Interact(); }
@@ -97,7 +108,7 @@ internal sealed class SingingView : UserControl, IDisposable
         AutomationProperties.SetName(Progress, "演唱进度");
         AutomationProperties.SetName(readOnlyProgress, "演唱进度，仅显示");
         AutomationProperties.SetName(this, "演唱界面");
-        foreach (var button in new[] { Back, Pause, Next, ExitButton, Start })
+        foreach (var button in new[] { Back, Pause, Next, LyricsButton, ExitButton, Start })
         {
             button.Background = Material(); button.BorderThickness = new Thickness(0);
             foreach (string state in new[] { "ButtonBackground", "ButtonBackgroundPointerOver", "ButtonBackgroundPressed", "ButtonBackgroundDisabled" })
@@ -122,16 +133,38 @@ internal sealed class SingingView : UserControl, IDisposable
         AutomationProperties.SetName(button, name); ToolTipService.SetToolTip(button, name);
         return button;
     }
-    public void Interact() { lastInteraction = Environment.TickCount64; toolbar.Visibility = Visibility.Visible; }
+    public void Interact() { lastInteraction = Environment.TickCount64; toolbar.Visibility = Visibility.Visible; lyricsStage.SetChromeVisible(true); }
     private void RefreshVisibility()
     {
-        toolbar.Visibility = !active || pinned || dragging || keyboardInControls || Environment.TickCount64 - lastInteraction < 3000
-            ? Visibility.Visible : Visibility.Collapsed;
+        bool visible = !active || pinned || dragging || keyboardInControls || Environment.TickCount64 - lastInteraction < 3000;
+        toolbar.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        lyricsStage.SetChromeVisible(visible);
     }
     public void SetActive(bool value)
     {
         active = value; dragging = keyboardInControls = false;
+        lyricsStage.SetActive(value && lyricsStage.Visibility == Visibility.Visible);
         if (value) { Interact(); Back.Focus(FocusState.Programmatic); }
+    }
+    internal void UpdateLyricsPresentation(bool showLyricsStage, string songKey, string title, string artist,
+        string album, string? coverUrl, uint? dominantArgb, string? rawLyrics, string? translationLyrics,
+        string? rawFormat, Vesper.Core.ParsedLyrics lyrics, int offsetMs, bool loadingLyrics, double durationSeconds)
+    {
+        Video.Visibility = showLyricsStage ? Visibility.Collapsed : Visibility.Visible;
+        if (showLyricsStage) firstFrame.Visibility = Visibility.Collapsed;
+        lyricsStage.Visibility = showLyricsStage ? Visibility.Visible : Visibility.Collapsed;
+        LyricsButton.Visibility = showLyricsStage ? Visibility.Visible : Visibility.Collapsed;
+        if (showLyricsStage)
+        {
+            lyricsStage.SetSong(songKey, title, artist, album, coverUrl, dominantArgb, rawLyrics,
+                translationLyrics, rawFormat, lyrics, offsetMs, loadingLyrics, allowSeek, durationSeconds);
+            lyricsStage.SetActive(active);
+            lyricsStage.UpdatePlaybackClock(lastPosition, lastLength, wasPaused);
+        }
+        else
+        {
+            lyricsStage.SetActive(false);
+        }
     }
     internal void UpdateState(bool hasSong, bool preparing, bool ready, bool paused, int pending, string message, bool canSeek)
     {
@@ -139,6 +172,8 @@ internal sealed class SingingView : UserControl, IDisposable
         wasPaused = paused;
         pinned = paused || preparing || !hasSong;
         allowSeek = canSeek;
+        lyricsStage.SetCanSeek(canSeek);
+        if (lyricsStage.Visibility == Visibility.Visible) lyricsStage.UpdatePlaybackClock(lastPosition, lastLength, paused);
         Progress.Visibility = canSeek ? Visibility.Visible : Visibility.Collapsed;
         readOnlyProgress.Visibility = canSeek ? Visibility.Collapsed : Visibility.Visible;
         Progress.IsEnabled = canSeek && ready && !preparing;
@@ -165,6 +200,8 @@ internal sealed class SingingView : UserControl, IDisposable
     internal void UpdateTime(TimeSpan position, TimeSpan length)
     {
         syncing = true;
+        lastPosition = position;
+        lastLength = length;
         try
         {
             Progress.Maximum = readOnlyProgress.Maximum = Math.Max(1, length.TotalSeconds);
@@ -172,6 +209,7 @@ internal sealed class SingingView : UserControl, IDisposable
             readOnlyProgress.Value = Math.Clamp(position.TotalSeconds, 0, readOnlyProgress.Maximum);
             elapsed.Text = Format(position); duration.Text = Format(length);
             if (position > TimeSpan.FromMilliseconds(100)) firstFrame.Visibility = Visibility.Collapsed;
+            if (lyricsStage.Visibility == Visibility.Visible) lyricsStage.UpdatePlaybackClock(position, length, wasPaused);
         }
         finally { syncing = false; }
     }
@@ -271,5 +309,5 @@ internal sealed class SingingView : UserControl, IDisposable
         expansion.ScaleX = expansion.ScaleY = 1; expansion.TranslateX = expansion.TranslateY = 0;
         Opacity = 1; layout.CornerRadius = new CornerRadius(0);
     }
-    public void Dispose() { timer.Stop(); ResetTransition(); }
+    public void Dispose() { timer.Stop(); ResetTransition(); lyricsStage.Dispose(); }
 }

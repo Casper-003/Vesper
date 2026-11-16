@@ -5,10 +5,18 @@ using System.Text.RegularExpressions;
 namespace Vesper.Core;
 
 public sealed record LyricsCandidate(long Id, string Title, string Artist, string Album, double DurationSeconds,
-    string PlainText, string SyncedLyrics = "", string WordLyricsFile = "", bool HasWordSync = false, string SourceUrl = "");
+    string PlainText, string SyncedLyrics = "", string WordLyricsFile = "", bool HasWordSync = false, string SourceUrl = "")
+{
+    public string TranslationLyrics { get; init; } = "";
+    public string RawFormat { get; init; } = "";
+}
 
 public sealed record SongLyrics(string PlainText, string SyncedLyrics, string WordLyricsFile, bool HasWordSync,
-    string SourceUrl, string Title, string Artist, double DurationSeconds, bool TimingCompatible);
+    string SourceUrl, string Title, string Artist, double DurationSeconds, bool TimingCompatible)
+{
+    public string TranslationLyrics { get; init; } = "";
+    public string RawFormat { get; init; } = "";
+}
 
 public sealed class LrcLibClient(HttpClient client)
 {
@@ -80,10 +88,18 @@ public sealed class LrcLibClient(HttpClient client)
 
     public static SongLyrics ToLyrics(LyricsCandidate match, double duration, string fileName)
     {
-        string plain = LyricsDisplay.Clean(match.PlainText.Length > 0 ? match.PlainText : match.SyncedLyrics);
+        string rawForPlain = match.PlainText.Length > 0 ? match.PlainText
+            : match.SyncedLyrics.Length > 0 ? match.SyncedLyrics
+            : LyricifyService.ExtractPlainText(match.WordLyricsFile);
+        string plain = LyricsDisplay.Clean(rawForPlain);
         bool timing = duration > 0 && Math.Abs(match.DurationSeconds - duration) <= 2
             && SongNameMatching.IsLive(fileName) == SongNameMatching.IsLive(match.Title + " " + match.Album);
         return new(plain, match.SyncedLyrics, match.WordLyricsFile, match.HasWordSync,
-            match.SourceUrl.Length > 0 ? match.SourceUrl : "https://lrclib.net/api/get/" + match.Id, match.Title, match.Artist, match.DurationSeconds, timing);
+            match.SourceUrl.Length > 0 ? match.SourceUrl : "https://lrclib.net/api/get/" + match.Id,
+            match.Title, match.Artist, match.DurationSeconds, timing)
+        {
+            TranslationLyrics = match.TranslationLyrics,
+            RawFormat = match.RawFormat
+        };
     }
 }

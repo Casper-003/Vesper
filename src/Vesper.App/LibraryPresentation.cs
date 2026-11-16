@@ -54,7 +54,10 @@ public sealed class LibrarySongItem(Song song) : INotifyPropertyChanged
     public bool HasNoLyrics => !HasLyrics && !LookupPending;
     public bool HasSource => SourceUrl.Length > 0;
     public string SourceLabel => SourceUrl.Contains("musicbrainz.org", StringComparison.OrdinalIgnoreCase) ? "资料来源：MusicBrainz" : SourceUrl.Contains("music.163.com") ? "资料来源：网易云音乐" : SourceUrl.Contains("deezer.com") ? "资料来源：Deezer" : "资料来源：LRCLIB";
-    public string LyricsSourceLabel => LyricsSourceUrl.Contains("music.163.com") ? "歌词来源：网易云音乐" : LyricsSourceUrl.Contains("kugou.com") ? "歌词来源：酷狗音乐" : "歌词来源：LRCLIB";
+    public string LyricsSourceLabel => LyricsSourceUrl.Contains("y.qq.com", StringComparison.OrdinalIgnoreCase) ? "歌词来源：QQ 音乐"
+        : LyricsSourceUrl.Contains("music.163.com", StringComparison.OrdinalIgnoreCase) ? "歌词来源：网易云音乐"
+        : LyricsSourceUrl.Contains("kugou.com", StringComparison.OrdinalIgnoreCase) ? "歌词来源：酷狗音乐"
+        : "歌词来源：LRCLIB";
     public string LyricsSourceUrl => details.OnlineLyrics?.SourceUrl ?? "";
     public bool HasLyricsSource => LyricsSourceUrl.Length > 0;
     public bool LookupPending { get => lookupPending; set { if (lookupPending == value) return; lookupPending = value; Notify(); NotifyLookup(); } }

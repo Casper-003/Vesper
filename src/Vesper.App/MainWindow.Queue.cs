@@ -206,6 +206,7 @@ public sealed partial class MainWindow
         if (queuePanelOpen) queueRailPreview = false;
         RefreshRightRailChevrons();
         RefreshRightPanelCollapseButtons();
+        UpdateSingingPreviewFluidActive();
         ToolTipService.SetToolTip(QueueOpenButton, $"展开待播曲目 · {viewModel.Queue.Pending.Count} 首");
     }
 
